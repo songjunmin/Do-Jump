@@ -4,7 +4,7 @@ import { BOSSES, BOTS, CARDS, CARD_MAP, type FactionId } from './data';
 import { displayName, isMaxed, master, newInstance, rankOf, toBattleCard, type BattleCard, type CardInstance } from './cards';
 import { applyEnhance, applyEvolve } from './growth';
 import { duel as runDuel, raidEngage as runRaid, leaderBattle, type DuelResult, type RaidResult, type Rng } from './engine';
-import { ADVENTURE_MAX_STEPS, ADVENTURE_MIN_STEPS, CHAPTERS, DROP_BANDS, STEP_EVENTS, adventureMinStamina, partKey, type Chapter, type QuestPart } from './questData';
+import { CHAPTERS, DROP_BANDS, STEP_EVENTS, partKey, stepExp, stepSilver, type Chapter, type QuestPart } from './questData';
 
 export type DeckIds = (string | null)[];
 export interface Preset { name: string; atk: DeckIds; def: DeckIds }
@@ -46,12 +46,14 @@ export interface Ctx { now: number; rng: Rng }
 /** 모험 중 보물상자 결과 */
 export interface Treasure { grade: 'silver' | 'gold'; kind: 'card' | 'silver'; cardName?: string; cardId?: string; cardUid?: string; rank?: string; amount?: number }
 
-/** 모험 1스텝 */
+/** 퀘스트 1스텝 (Enter 1회) */
 export interface AdventureStep {
   type: 'move' | 'enemy' | 'treasure';
   stamina: number;
+  exp: number;
+  silver: number;
   progress: number;
-  enemy?: { name: string; glyph: string; hp: number; hits: number; dmg: number };
+  enemy?: { name: string; glyph: string };
   treasure?: Treasure;
 }
 
@@ -67,8 +69,10 @@ export interface QuestState {
   bossCleared: Record<string, boolean>;
   /** 리더 카드 uid */
   leader: string | null;
-  /** 누적 모험 횟수 */
+  /** 누적 스텝 수 */
   adventures: number;
+  /** 퀘스트에서 한 번이라도 얻은 카드 (목록의 드랍 칸 '?' 해제용) */
+  found: Record<string, boolean>;
 }
 
 const emptyDeck = (): DeckIds => [null, null, null, null, null];
@@ -134,6 +138,7 @@ export function createPlayer(name: string, faction: FactionId, ctx: Ctx): Player
 export function tick(s: PlayerState, ctx: Ctx): void {
   const now = ctx.now;
   if (!s.quest || (s.quest as any).v !== 3) { s.quest = initQuest(); s.quest.leader = s.presets[0]?.atk[2] ?? s.cards[0]?.uid ?? null; }
+  if (!s.quest.found) s.quest.found = {};
   if (s.quest.leader && !s.cards.some((c) => c.uid === s.quest.leader)) s.quest.leader = null;
   // 체력: 1분당 1, 상한 초과분은 예비 풀로
   const gained = Math.floor((now - s.staminaAt) / C.STAMINA_REGEN_MS);
@@ -312,7 +317,7 @@ function addPlayerExp(s: PlayerState, exp: number): number {
 }
 
 export function initQuest(): QuestState {
-  return { v: 3, unlocked: 1, progress: {}, cleared: {}, bossCleared: {}, leader: null, adventures: 0 };
+  return { v: 3, unlocked: 1, progress: {}, cleared: {}, bossCleared: {}, leader: null, adventures: 0, found: {} };
 }
 
 function chapterOf(id: number): Chapter {
@@ -347,9 +352,10 @@ function openTreasure(s: PlayerState, qp: QuestPart, ctx: Ctx): Treasure {
   else if (ctx.rng() < 0.55) pool = ctx.rng() < 0.12 ? qp.drops.upper : qp.drops.base;
   if (pool && pool.length) {
     const inst = grantCard(s, pick(pool, ctx.rng), ctx.now);
+    if (inst) s.quest.found[inst.cardId] = true;
     if (inst) return { grade: gold ? 'gold' : 'silver', kind: 'card', cardName: displayName(inst), cardId: inst.cardId, cardUid: inst.uid, rank: rankOf(inst) };
   }
-  const amount = qp.stamina * C.QUEST_SILVER_PER_STAMINA * 2;
+  const amount = stepSilver(qp).max * 5;
   s.silver += amount;
   return { grade: gold ? 'gold' : 'silver', kind: 'silver', amount };
 }
@@ -362,49 +368,35 @@ function rollEvent(ctx: Ctx): AdventureStep['type'] {
 }
 
 /**
- * 퀘스트 모험 1회: [모험] 1탭 = 3~5스텝 자동 진행 (§5.1).
- * 스텝마다 이동 / 적 조우(리더 카드가 자동 전투) / 보물상자 중 하나가 일어난다.
- * 스텝당 체력 10~15, 경험치 = 소모 체력, 은화 = 소모 체력 × 300.
- * 파트 100% 도달이나 체력 부족 시 모험이 그 자리에서 끝난다.
+ * 퀘스트 1스텝 = Enter 1회 (§5.1).
+ * 이동 / 적 조우(리더 카드가 처치) / 보물상자 중 하나가 일어난다.
+ * 소비 체력은 장마다 다르고, 경험치 = 소비 체력, 은화 = 소비 체력 × 10~12.
  */
-export function questAdventure(s: PlayerState, chapter: number, part: number, ctx: Ctx) {
+export function questStep(s: PlayerState, chapter: number, part: number, ctx: Ctx) {
   const ch = chapterOf(chapter);
   const qp = ch.parts[part - 1];
   if (!qp) throw new Error('없는 파트입니다.');
   if (!canEnterPart(s, chapter, part)) throw new Error('아직 열리지 않은 파트입니다.');
-  const leader = leaderCard(s);
-  if (!leader) throw new Error('리더 카드를 먼저 정하세요.');
-  const minStamina = adventureMinStamina(qp);
-  if (s.stamina < minStamina) throw new Error(`체력이 부족합니다. (모험 최소 ${minStamina})`);
+  if (!leaderCard(s)) throw new Error('리더 카드를 먼저 정하세요.');
+  if (s.stamina < qp.stamina) throw new Error(`체력이 부족합니다. (필요 ${qp.stamina})`);
   const key = partKey(chapter, part);
   if ((s.quest.progress[key] ?? 0) >= 100) s.quest.progress[key] = 0; // 클리어한 파트 재진행
 
-  const atk = toBattleCard(leader).atk;
-  const planned = ADVENTURE_MIN_STEPS + Math.floor(ctx.rng() * (ADVENTURE_MAX_STEPS - ADVENTURE_MIN_STEPS + 1));
-  const steps: AdventureStep[] = [];
-  let stamina = 0;
-  let levelUps = 0;
-  let partClear = false;
-  for (let i = 0; i < planned; i++) {
-    if (s.stamina < qp.stamina) break;
-    s.stamina -= qp.stamina;
-    stamina += qp.stamina;
-    s.silver += qp.stamina * C.QUEST_SILVER_PER_STAMINA;
-    levelUps += addPlayerExp(s, qp.stamina);
-    const progress = Math.min(100, (s.quest.progress[key] ?? 0) + qp.gain);
-    s.quest.progress[key] = progress;
-    const type = rollEvent(ctx);
-    const step: AdventureStep = { type, stamina: qp.stamina, progress };
-    if (type === 'enemy') {
-      step.enemy = { ...qp.monster, hits: Math.max(1, Math.ceil(qp.monster.hp / Math.max(1, atk))), dmg: atk };
-    } else if (type === 'treasure') {
-      step.treasure = openTreasure(s, qp, ctx);
-    }
-    steps.push(step);
-    if (progress >= 100) { partClear = true; break; }
-  }
+  const range = stepSilver(qp);
+  const silver = range.min + Math.floor(ctx.rng() * (range.max - range.min + 1));
+  const exp = stepExp(qp);
+  s.stamina -= qp.stamina;
+  s.silver += silver;
+  const levelUps = addPlayerExp(s, exp);
+  const progress = Math.min(100, (s.quest.progress[key] ?? 0) + qp.gain);
+  s.quest.progress[key] = progress;
   s.quest.adventures++;
+  const type = rollEvent(ctx);
+  const step: AdventureStep = { type, stamina: qp.stamina, exp, silver, progress };
+  if (type === 'enemy') step.enemy = { name: qp.monster.name, glyph: qp.monster.glyph };
+  else if (type === 'treasure') step.treasure = openTreasure(s, qp, ctx);
 
+  const partClear = progress >= 100;
   let firstClear = false;
   let points = 0;
   if (partClear && !s.quest.cleared[key]) {
@@ -413,15 +405,26 @@ export function questAdventure(s: PlayerState, chapter: number, part: number, ct
     s.statPoints += C.POINTS_PER_PART;
     points = C.POINTS_PER_PART;
   }
-  const outOfStamina = s.stamina < minStamina;
-  const stopReason = partClear ? 'partClear' : levelUps > 0 ? 'levelUp' : outOfStamina ? 'stamina' : null;
   return {
-    steps, planned, stamina, exp: stamina, silver: stamina * C.QUEST_SILVER_PER_STAMINA, progress: s.quest.progress[key],
-    treasures: steps.filter((x) => x.treasure).map((x) => x.treasure!),
-    enemies: steps.filter((x) => x.enemy).length,
-    partClear, firstClear, points, levelUps, stopReason, outOfStamina,
+    step, partClear, firstClear, points, levelUps,
+    outOfStamina: s.stamina < qp.stamina,
     bossUnlocked: firstClear && chapterAllCleared(s, ch) && !s.quest.bossCleared[String(chapter)],
   };
+}
+
+/** 카드 판매가: 등급 기본가 × 투입 장수 + 레벨 보정 */
+export const sellPrice = (c: CardInstance) => C.SELL_PRICE[rankOf(c)] * Math.max(1, c.base_cards_used) + c.level * 5;
+
+/** 카드 판매 (보호·덱 편성·리더 카드는 불가) */
+export function sellCards(s: PlayerState, uids: string[]) {
+  const uniq = Array.from(new Set(uids));
+  if (!uniq.length) throw new Error('판매할 카드를 고르세요.');
+  const cards = uniq.map((u) => findCard(s, u));
+  cards.forEach((c) => assertMaterial(s, c));
+  const silver = cards.reduce((a, c) => a + sellPrice(c), 0);
+  removeCards(s, uniq);
+  s.silver += silver;
+  return { silver, count: cards.length };
 }
 
 /** 장 보스 배틀: 리더 카드 1장으로 자동 턴제. 승리해야 다음 장 해금, 클리어 후 재도전 불가 */
@@ -442,7 +445,7 @@ export function questBoss(s: PlayerState, chapter: number, ctx: Ctx) {
     s.vitality += 1;
     reward = { vitality: 1, nextChapter: next?.id };
     const inst = grantCard(s, pick(cardsOf(DROP_BANDS[ch.band].upper), ctx.rng), ctx.now);
-    if (inst) reward.cardName = displayName(inst);
+    if (inst) { reward.cardName = displayName(inst); s.quest.found[inst.cardId] = true; }
   }
   return { result, boss: ch.boss, reward };
 }

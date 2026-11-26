@@ -124,12 +124,22 @@ export class Server {
     return view(s, c);
   }
 
-  /** 퀘스트 모험 1회 ([모험] 1탭 = 3~5스텝 자동 진행). 결과만 반환하고 클라이언트는 연출만 재생 */
-  async questAdventure(chapter: number, part: number) {
+  /** 퀘스트 1스텝 (Enter 1회). 결과만 반환하고 클라이언트는 연출만 재생 */
+  async questStep(chapter: number, part: number) {
     const c = ctx();
     const s = await loadOrThrow(c);
-    const result = P.questAdventure(s, Number(chapter), Number(part), c);
+    const result = P.questStep(s, Number(chapter), Number(part), c);
     await save(s);
+    return { ...view(s, c), result };
+  }
+
+  /** 카드 판매 (여러 장 한 번에) */
+  async sellCards(uids: string[]) {
+    const c = ctx();
+    const s = await loadOrThrow(c);
+    const result = P.sellCards(s, (uids || []).map(String));
+    await save(s);
+    await publishGhost(s, c);
     return { ...view(s, c), result };
   }
 

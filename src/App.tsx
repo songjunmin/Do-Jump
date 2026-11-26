@@ -110,7 +110,7 @@ export default function App() {
       </main>
       <nav className="tabs">
         {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>
+          <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => { setTab(t.id); window.scrollTo(0, 0); }}>
             <span className="ic">{t.ic}</span>{t.label}
           </button>
         ))}

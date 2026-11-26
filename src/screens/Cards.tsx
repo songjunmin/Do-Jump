@@ -1,45 +1,122 @@
 import { useMemo, useState } from 'react';
 import type { Run } from '../App';
-import { cardsInDecks, type PlayerState } from '../../server/src/game/player';
+import { cardsInDecks, sellPrice, type PlayerState } from '../../server/src/game/player';
 import * as C from '../../server/src/game/config';
 import { canEvolve, displayName, evoFormula, isMaxed, levelCap, master, rankOf, skillOf, statsOf, type CardInstance } from '../../server/src/game/cards';
-import { FACTIONS, CURRENCY } from '../../server/src/game/data';
+import { FACTIONS, CURRENCY, type FactionId } from '../../server/src/game/data';
 import { previewEnhance, previewEvolve } from '../../server/src/game/growth';
 import { CardView, Modal, fmt } from '../ui/common';
 
 const rankIdx = (c: CardInstance) => C.RANKS.indexOf(rankOf(c));
 const sortCards = (a: CardInstance, b: CardInstance) =>
   rankIdx(b) - rankIdx(a) || b.form - a.form || b.level - a.level || a.cardId.localeCompare(b.cardId);
+/** 성장도: 현재 레벨이 레벨 상한까지 얼마나 왔는지 (Lv1 = 0%, 맥강 = 100%) */
+export const growthPct = (c: CardInstance) => { const cap = levelCap(c); return cap <= 1 ? 100 : Math.round(((c.level - 1) / (cap - 1)) * 100); };
 
-type Filter = 'all' | 'N' | 'R' | 'HR+';
+type Faction = 'all' | FactionId;
+type SortKey = 'rank' | 'chara' | 'level' | 'atk' | 'def' | 'cost' | 'growth' | 'new';
+const SORTS: Record<SortKey, { label: string; fn: (a: CardInstance, b: CardInstance) => number }> = {
+  rank: { label: '등급순', fn: sortCards },
+  chara: { label: '캐릭터 순서', fn: (a, b) => a.cardId.localeCompare(b.cardId) || b.form - a.form || b.level - a.level },
+  level: { label: '레벨순', fn: (a, b) => b.level - a.level || sortCards(a, b) },
+  atk: { label: '공격력순', fn: (a, b) => statsOf(b).atk - statsOf(a).atk },
+  def: { label: '방어력순', fn: (a, b) => statsOf(b).def - statsOf(a).def },
+  cost: { label: '코스트순', fn: (a, b) => master(b.cardId).cost - master(a.cardId).cost || sortCards(a, b) },
+  growth: { label: '성장도순', fn: (a, b) => growthPct(b) - growthPct(a) || sortCards(a, b) },
+  new: { label: '최근 획득순', fn: (a, b) => b.createdAt - a.createdAt || Number(b.uid.slice(1)) - Number(a.uid.slice(1)) },
+};
 
 export default function Cards({ s, run, busy, say }: { s: PlayerState; run: Run; busy: boolean; say: (m: string, e?: boolean) => void }) {
-  const [filter, setFilter] = useState<Filter>('all');
+  const [tab, setTab] = useState<'list' | 'sell'>('list');
+  const [faction, setFaction] = useState<Faction>('all');
+  const [sort, setSort] = useState<SortKey>('rank');
   const [openUid, setOpenUid] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
   const inDeck = useMemo(() => cardsInDecks(s), [s]);
-  const list = useMemo(() => s.cards.filter((c) => {
-    const r = rankOf(c);
-    if (filter === 'N') return r === 'N' || r === 'HN';
-    if (filter === 'R') return r === 'R';
-    if (filter === 'HR+') return C.RANKS.indexOf(r) >= C.RANKS.indexOf('HR');
-    return true;
-  }).sort(sortCards), [s.cards, filter]);
+  const leader = s.cards.find((c) => c.uid === s.quest.leader) || null;
+  const list = useMemo(() => s.cards
+    .filter((c) => c.uid !== s.quest.leader)
+    .filter((c) => faction === 'all' || master(c.cardId).faction === faction)
+    .sort(SORTS[sort].fn), [s.cards, s.quest.leader, faction, sort]);
   const open = s.cards.find((c) => c.uid === openUid) || null;
+  const sellable = (c: CardInstance) => !c.locked && !inDeck.has(c.uid) && c.uid !== s.quest.leader;
+  const pickedCards = picked.map((u) => s.cards.find((c) => c.uid === u)).filter(Boolean) as CardInstance[];
+  const total = pickedCards.reduce((a, c) => a + sellPrice(c), 0);
+  const toggle = (u: string) => setPicked((xs) => xs.includes(u) ? xs.filter((x) => x !== u) : [...xs, u]);
 
   return (
     <div>
-      <div className="row between"><h2>보유 카드 <span className="muted small">{s.cards.length}/{C.INVENTORY_CAP}</span></h2></div>
-      <div className="seg" style={{ marginBottom: 10 }}>
-        {(['all', 'N', 'R', 'HR+'] as Filter[]).map((f) => (
-          <button key={f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f === 'all' ? '전체' : f === 'N' ? 'N·HN' : f}</button>
-        ))}
+      <h2 style={{ marginTop: 0 }}>보유카드 리스트 <span className="muted small">({s.cards.length}/{C.INVENTORY_CAP})</span></h2>
+      <div className="seg" style={{ marginBottom: 8 }}>
+        <button className={tab === 'list' ? 'on' : ''} onClick={() => { setTab('list'); setPicked([]); }}>리스트</button>
+        <button className={tab === 'sell' ? 'on' : ''} onClick={() => setTab('sell')}>판매</button>
       </div>
-      <p className="muted small" style={{ marginTop: 0 }}>📌 덱 편성 중 · 🔒 보호 중 (둘 다 재료로 쓸 수 없음)</p>
-      <div className="cardgrid">
-        {list.map((c) => <CardView key={c.uid} c={c} inDeck={inDeck.has(c.uid)} onClick={() => setOpenUid(c.uid)} />)}
+      <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+        <div className="seg grow">
+          {(['all', 'dawn', 'dusk'] as Faction[]).map((f) => (
+            <button key={f} className={faction === f ? 'on' : ''} onClick={() => setFaction(f)}>{f === 'all' ? '전체' : FACTIONS[f].name}</button>
+          ))}
+        </div>
+        <select className="sortsel" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="정렬">
+          {(Object.keys(SORTS) as SortKey[]).map((k) => <option key={k} value={k}>{SORTS[k].label}</option>)}
+        </select>
       </div>
+
+      {tab === 'list' && (
+        <>
+          <div className="crow-head">리더 카드</div>
+          {leader ? <CardRow c={leader} inDeck={inDeck.has(leader.uid)} leader onClick={() => setOpenUid(leader.uid)} /> : <p className="muted small">리더 카드가 없어요. 카드를 눌러 리더로 지정하세요.</p>}
+          <div className="crow-head">보유 카드</div>
+          <p className="muted small" style={{ marginTop: 0 }}>📌 덱 편성 중 · 🔒 보호 중 · 👑 리더</p>
+          <div className="crows">{list.map((c) => <CardRow key={c.uid} c={c} inDeck={inDeck.has(c.uid)} onClick={() => setOpenUid(c.uid)} />)}</div>
+        </>
+      )}
+
+      {tab === 'sell' && (
+        <>
+          <p className="muted small" style={{ marginTop: 0 }}>보호 중·덱 편성 중·리더 카드는 팔 수 없어요.</p>
+          <div className="crows">
+            {list.filter(sellable).map((c) => (
+              <CardRow key={c.uid} c={c} inDeck={false} selected={picked.includes(c.uid)} price={sellPrice(c)} onClick={() => toggle(c.uid)} />
+            ))}
+          </div>
+          <div className="sellbar">
+            <span>선택 {picked.length}장 · <b>{fmt(total)}</b> {CURRENCY.silver.name}</span>
+            <button className="btn primary" disabled={busy || !picked.length} onClick={async () => {
+              const r = await run<any>('sellCards', picked);
+              if (r) { say(`${r.count}장 판매 · ${CURRENCY.silver.name} +${fmt(r.silver)}`); setPicked([]); }
+            }}>판매</button>
+          </div>
+        </>
+      )}
       {open && <CardDetail key={open.uid} c={open} s={s} run={run} busy={busy} say={say} inDeck={inDeck} onClose={() => setOpenUid(null)} />}
     </div>
+  );
+}
+
+function CardRow({ c, inDeck, leader, selected, price, onClick }: { c: CardInstance; inDeck: boolean; leader?: boolean; selected?: boolean; price?: number; onClick: () => void }) {
+  const m = master(c.cardId);
+  const rank = rankOf(c);
+  const st = statsOf(c);
+  const g = growthPct(c);
+  return (
+    <button className={`crow${selected ? ' sel' : ''}${leader ? ' leader' : ''}`} style={{ ['--rc' as any]: `var(--r-${rank})` }} onClick={onClick}>
+      <div className="cthumb" style={{ background: `linear-gradient(160deg, ${FACTIONS[m.faction].color}55, #15161f 75%)` }}>
+        <span className="rk">{rank}</span><span>{m.glyph}</span>
+        <span className="stars">{'★'.repeat(c.form)}</span>
+      </div>
+      <div className="cinfo">
+        <div className="cname">{leader && '👑 '}{c.locked && '🔒 '}{inDeck && '📌 '}{displayName(c)}</div>
+        <div className="cstats">
+          <span>Lv <b>{c.level}</b>/{levelCap(c)}</span>
+          <span>코스트 <b>{m.cost}</b></span>
+          <span>공 <b className="a">{fmt(st.atk)}</b></span>
+          <span>방 <b className="d">{fmt(st.def)}</b></span>
+        </div>
+        <div className="cgrow"><span>성장도 {g}%</span><div className="bar"><i style={{ width: `${g}%` }} /></div></div>
+      </div>
+      {price != null && <div className="cprice">{selected ? '✔' : ''}<br />{fmt(price)}</div>}
+    </button>
   );
 }
 
@@ -91,6 +168,9 @@ function CardDetail({ c, s, run, busy, say, inDeck, onClose }: {
             <button className="btn grow" disabled={busy || !canEvolve(c)} onClick={() => setMode('evolve')}>진화</button>
             <button className="btn" disabled={busy} onClick={() => run('toggleLock', c.uid)}>{c.locked ? '보호 해제' : '보호'}</button>
           </div>
+          <button className="btn block" style={{ marginTop: 6 }} disabled={busy || s.quest.leader === c.uid} onClick={async () => { await run('setLeader', c.uid); say(`${displayName(c)}을(를) 리더로 지정했어요`); }}>
+            {s.quest.leader === c.uid ? '👑 현재 리더 카드' : '리더로 지정하기 (퀘스트·장 보스)'}
+          </button>
         </>
       )}
 

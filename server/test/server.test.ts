@@ -42,60 +42,36 @@ describe('플레이어', () => {
 });
 
 describe('퀘스트', () => {
-  test('모험 1회 = 3~5스텝, 스텝당 체력·경험치·은화 300배', async (server) => {
+  test('Enter 1회 = 1스텝, 제1장 체력 -1 · 경험치 +1 · 은화 +10~12', async (server) => {
     const s = await setup(server);
     expect(s.quest.leader).toBeTruthy();
-    const r = await server.questAdventure(1, 1);
-    const res = r.result;
-    expect(res.steps.length).toBeGreaterThanOrEqual(3);
-    expect(res.steps.length).toBeLessThanOrEqual(5);
-    expect(r.state.stamina).toBe(s.stamina - res.stamina);
-    expect(res.stamina).toBe(res.steps.length * 10);
-    expect(res.exp).toBe(res.stamina);
-    expect(res.silver).toBe(res.stamina * 300);
-    for (const st of res.steps) expect(['move', 'enemy', 'treasure']).toContain(st.type);
+    const r = await server.questStep(1, 1);
+    const st = r.result.step;
+    expect(['move', 'enemy', 'treasure']).toContain(st.type);
+    expect(st.stamina).toBe(1);
+    expect(st.exp).toBe(1);
+    expect(st.silver).toBeGreaterThanOrEqual(10);
+    expect(st.silver).toBeLessThanOrEqual(12);
+    expect(r.state.stamina).toBe(s.stamina - 1);
   });
 
   test('앞 파트를 깨기 전에는 다음 파트·다음 장에 들어갈 수 없다', async (server) => {
     await setup(server);
-    expect(await fails(server.questAdventure(1, 2))).toContain('열리지');
-    expect(await fails(server.questAdventure(2, 1))).toContain('열리지');
+    expect(await fails(server.questStep(1, 2))).toContain('열리지');
+    expect(await fails(server.questStep(2, 1))).toContain('열리지');
   });
 
-  test('파트 = 12~15스텝, 완료 시 속성 포인트 +1, 재진행 가능', async (server) => {
+  test('파트 = 12스텝(제1장), 완료 시 속성 포인트 +1, 재진행 가능', async (server) => {
     await setup(server);
     let steps = 0;
     let r: any;
-    let adv = 0;
-    do {
-      const st = (await server.getState()).state;
-      if (st.stamina < 30) await server.useVitality();
-      r = await server.questAdventure(1, 1);
-      steps += r.result.steps.length;
-      adv++;
-    } while (!r.result.partClear);
-    expect(steps).toBeGreaterThanOrEqual(12);
-    expect(steps).toBeLessThanOrEqual(15);
-    expect(adv).toBeGreaterThanOrEqual(3);
+    do { r = await server.questStep(1, 1); steps++; } while (!r.result.partClear);
+    expect(steps).toBe(12);
     expect(r.result.firstClear).toBe(true);
     expect(r.result.points).toBe(1);
-    await server.protoSupply();
-    await server.useVitality();
-    const again = await server.questAdventure(1, 1);
+    const again = await server.questStep(1, 1);
     expect(again.result.firstClear).toBe(false);
-    expect(again.result.progress).toBeLessThan(100);
-  });
-
-  test('체력이 모험 최소치(3스텝) 미만이면 시작할 수 없다', async (server) => {
-    await setup(server);
-    let r: any;
-    for (let i = 0; i < 20; i++) {
-      r = await server.questAdventure(1, 1).catch((e: any) => ({ err: String(e.message || e) }));
-      if (r.err) break;
-      if (r.result.partClear) break;
-    }
-    const st = (await server.getState()).state;
-    if (st.stamina < 30) expect(await fails(server.questAdventure(1, 1))).toContain('체력');
+    expect(again.result.step.progress).toBeLessThan(100);
   });
 
   test('모든 파트 완료 → 보스 해금, 승리 시 다음 장, 재도전 불가', async (server) => {
@@ -103,19 +79,26 @@ describe('퀘스트', () => {
     expect(await fails(server.questBoss(1))).toContain('100%');
     for (let part = 1; part <= 5; part++) {
       let done = false;
-      while (!done) {
-        const st = (await server.getState()).state;
-        if (st.stamina < 45) { if (st.vitality <= 0) await server.protoSupply(); await server.useVitality(); }
-        const r = await server.questAdventure(1, part);
-        done = r.result.partClear;
-      }
+      while (!done) done = (await server.questStep(1, part)).result.partClear;
     }
     const b = await server.questBoss(1);
     expect(b.result.result.win).toBe(true);
     expect(b.state.quest.unlocked).toBe(2);
     expect(await fails(server.questBoss(1))).toContain('이미');
-    const ch2 = await server.questAdventure(2, 1);
-    expect(ch2.result.progress).toBeGreaterThan(0);
+    const ch2 = await server.questStep(2, 1);
+    expect(ch2.result.step.stamina).toBe(1);
+  });
+
+  test('카드 판매: 은화 지급, 리더·덱 카드는 판매 불가', async (server) => {
+    const s = await setup(server);
+    const deckUid = s.presets[0].atk.find(Boolean);
+    expect(await fails(server.sellCards([deckUid]))).toContain('덱');
+    expect(await fails(server.sellCards([s.quest.leader]))).toBeTruthy();
+    const n = spare(s, 'n_spear')[0];
+    const r = await server.sellCards([n.uid]);
+    expect(r.result.silver).toBeGreaterThan(0);
+    expect(r.state.silver).toBe(s.silver + r.result.silver);
+    expect(r.state.cards.length).toBe(s.cards.length - 1);
   });
 
   test('리더 카드는 강화 재료로 쓸 수 없다', async (server) => {

@@ -54,10 +54,11 @@ export const START_COST = 60;
 export const POINTS_PER_LEVEL = 3;
 export const POINTS_PER_PART = 1;
 export const INVENTORY_CAP = 200;
-export const playerExpToNext = (level: number) => 50 + level * 25;
+/** 플레이어 레벨업 경험치 (Lv1 → 10) */
+export const playerExpToNext = (level: number) => 5 + level * 5;
 
-/** 퀘스트 (§5.1) */
-export const QUEST_SILVER_PER_STAMINA = 300;
+/** 카드 판매 기본가 (등급별) */
+export const SELL_PRICE: Record<Rank, number> = { N: 50, HN: 100, R: 300, HR: 1000, SR: 3000, SSR: 8000, LG: 20000 };
 /** 보스전에서 리더 카드의 체력 = 방어력 × 배수 */
 export const LEADER_HP_MULT = 3;
 export const LEADER_MAX_TURNS = 40;
