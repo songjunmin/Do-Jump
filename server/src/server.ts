@@ -124,11 +124,11 @@ export class Server {
     return view(s, c);
   }
 
-  /** 퀘스트 탐색 1회 ([진행] 1탭) */
-  async questExplore(chapter: number, part: number) {
+  /** 퀘스트 전투 1회 ([공격] 1탭 = 몬스터 1마리) */
+  async questBattle(chapter: number, part: number) {
     const c = ctx();
     const s = await loadOrThrow(c);
-    const result = P.questExplore(s, Number(chapter), Number(part), c);
+    const result = P.questBattle(s, Number(chapter), Number(part), c);
     await save(s);
     return { ...view(s, c), result };
   }

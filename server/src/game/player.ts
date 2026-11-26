@@ -56,9 +56,9 @@ export interface QuestState {
   cleared: Record<string, boolean>;
   /** 장 보스 클리어 여부 (1회성) */
   bossCleared: Record<string, boolean>;
-  /** 마지막 상자 이후 탐색 수 */
+  /** 마지막 상자 이후 전투 수 */
   battles: number;
-  /** 다음 상자까지 필요한 탐색 수 (3~5) */
+  /** 다음 상자까지 필요한 전투 수 (3~5) */
   nextBox: number;
   box: QuestBox | null;
   /** 리더 카드 uid */
@@ -348,8 +348,8 @@ function rollBox(s: PlayerState, ch: Chapter, stamina: number, ctx: Ctx): QuestB
   return { grade: gold ? 'gold' : 'silver', kind: 'silver', amount };
 }
 
-/** 퀘스트 탐색 1회: [진행] 1탭 = 탐색 1회 (§5.1) */
-export function questExplore(s: PlayerState, chapter: number, part: number, ctx: Ctx) {
+/** 퀘스트 전투 1회: [공격] 1탭 = 몬스터 1마리 (§5.1) */
+export function questBattle(s: PlayerState, chapter: number, part: number, ctx: Ctx) {
   const ch = chapterOf(chapter);
   const qp = ch.parts[part - 1];
   if (!qp) throw new Error('없는 파트입니다.');
@@ -365,6 +365,8 @@ export function questExplore(s: PlayerState, chapter: number, part: number, ctx:
   const silver = qp.stamina * C.QUEST_SILVER_PER_STAMINA;
   s.silver += silver;
   const levelUps = addPlayerExp(s, qp.stamina);
+  const atk = toBattleCard(leader).atk;
+  const hits = Math.max(1, Math.ceil(qp.monster.hp / Math.max(1, atk)));
   const progress = Math.min(100, (s.quest.progress[key] ?? 0) + qp.gain);
   s.quest.progress[key] = progress;
 
@@ -381,7 +383,7 @@ export function questExplore(s: PlayerState, chapter: number, part: number, ctx:
     }
   }
 
-  // 3~5회 탐색마다 보상 상자
+  // 3~5회 전투마다 보상 상자
   s.quest.battles++;
   let box: QuestBox | null = null;
   if (s.quest.battles >= s.quest.nextBox) {
@@ -393,7 +395,7 @@ export function questExplore(s: PlayerState, chapter: number, part: number, ctx:
 
   const stopReason = partClear ? 'partClear' : levelUps > 0 ? 'levelUp' : box ? 'box' : s.stamina < qp.stamina ? 'stamina' : null;
   return {
-    stamina: qp.stamina, exp: qp.stamina, silver, progress,
+    monster: qp.monster, leaderAtk: atk, hits, stamina: qp.stamina, exp: qp.stamina, silver, progress,
     partClear, firstClear, points, levelUps, box, stopReason,
     bossUnlocked: firstClear && chapterAllCleared(s, ch) && !s.quest.bossCleared[String(chapter)],
   };
