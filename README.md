@@ -1,2 +1,71 @@
-# TCG_Game
-Verse8 Game TCG_Game
+# 여명과 황혼 TCG (가제)
+
+Verse8에 출시할 웹 카드 게임의 **프로토타입**입니다. 기획서 §9.1 범위(전투 함수 2개, 더미 카드 18종, 스킬, 강화·진화 1사이클)를 플레이 가능한 형태로 만들고, 결투장·레이드·퀘스트·덱 프리셋까지 이후 확장을 받을 수 있는 구조로 잡았습니다.
+
+## 구조 (Verse8 / Agent8 표준)
+
+```
+index.html, vite.config.ts      Vite + React 클라이언트
+src/
+  api/index.ts                  서버 호출 계층 (Verse8: @agent8/gameserver remoteFunction)
+  api/localServer.ts            오프라인 미리보기 전용: 같은 서버 코드를 브라우저에서 실행
+  screens/                      홈(퀘스트) · 카드(강화/진화) · 덱 · 결투장 · 레이드 · 전투 연출
+server/
+  src/server.ts                 Verse8 게임 서버 (remote function 모음). 빌드 결과: server/dist/server.js
+  src/game/config.ts            밸런스 상수 (기획서 수치)
+  src/game/data.ts              진형 · 화폐 · 스킬 · 카드 18종 · 보스 · 결투장 봇
+  src/game/cards.ts             카드 인스턴스, 스탯 계산
+  src/game/engine.ts            duel(), raidEngage(), rollSkills()
+  src/game/growth.ts            강화 · 진화
+  src/game/player.ts            플레이어 상태와 모든 행동
+  test/server.test.ts           Verse8 테스트 러너(isolated-vm)용 통합 테스트
+  unit/engine.test.ts           순수 로직 단위 테스트 (bun test)
+```
+
+### 기획서 §9.3 필수 사항
+
+| 항목 | 구현 |
+|---|---|
+| 전투는 서버에서 계산 | `duel`, `raidEngage`는 `server/src/server.ts`에서만 실행. 클라이언트는 결과를 받아 연출만 재생 |
+| 레이드 교전 = API 1콜 | `raidEngage()` 한 번이 교전 전체를 계산해 타임라인과 함께 반환 |
+| 카드 인스턴스 필수 필드 | `base_cards_used`, `max_enhance_count`, `tradable`, `locked`(보호)를 생성 시점부터 저장 |
+| 덱 프리셋 2~3개 | 프리셋 3개(공격/방어 덱 각 5칸) |
+| 전투 스킵 | 결투장·레이드 연출 모두 스킵 버튼 제공 |
+
+데이터 저장: 유저 상태는 `$global.updateMyState({ p })`, 결투장 유령 덱(다른 유저의 방어 덱 스냅샷)은 `$global` 컬렉션 `defense_decks`.
+
+## 실행
+
+```bash
+npm install            # 또는 bun install
+cd server && npm install && cd ..
+
+npm run dev            # Verse8 서버에 연결하는 개발 서버 (VITE_AGENT8_VERSE 필요)
+npm run build          # Verse8 배포용 빌드 (dist/)
+npm run build:offline  # 서버 없이 도는 단일 HTML 미리보기 (dist-offline/index.html)
+npm test               # 단위 테스트 + Verse8 서버 테스트
+```
+
+Verse8에 올릴 때는 verse8 MCP의 `verse8_attach` → `verse8_preview` → `verse8_deploy` 순서를 따릅니다. 게임 서버는 `server/src/server.ts`에서 빌드됩니다.
+
+## 기획서와 다르게 둔 이름 (임시 오리지널)
+
+원작의 고유명사는 쓰지 않았습니다.
+
+| 기획서 | 이 프로젝트 |
+|---|---|
+| 루피 | 은화 |
+| 홀리파우더 | 별가루 |
+| 큐어워터 | 활력수 |
+| 진형 2개 (미결) | 새벽 기사단 / 황혼 결사 |
+
+## 프로토타입 전용 기능
+
+`server/src/game/config.ts`의 `PROTOTYPE_MODE = true`일 때만 동작합니다. 출시 전 `false`로 바꿉니다.
+
+- 테스트 보급: N 6장 + R 1장(+HR 확률) + 은화·별가루·활력수
+- 데이터 초기화
+
+## 미구현 (다음 단계)
+
+주간 공유 보스, 뽑기·천장, 파편(분해·사본), 퀘스트 장 보스전(리더 카드), 동료 초대, 진형 변경 과금, 결투장 주간 보상 상세.
