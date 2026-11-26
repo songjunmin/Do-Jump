@@ -155,3 +155,55 @@ input[type=text] { width: 100%; background: var(--bg2); border: 1px solid var(--
 .rbox-ic { font-size: 48px; animation: pop .35s ease-out; }
 @media (prefers-reduced-motion: reduce) { .mglyph.hit, .float-dmg, .rbox-ic, .verdict { animation: none; } }
 .stage-leader.hurt { animation: shake .22s; filter: drop-shadow(0 0 8px rgba(239,93,106,.8)); }
+
+/* 모험 연출 */
+.drops { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; align-items: center; }
+.pill.drop { font-size: 10px; padding: 1px 6px; }
+.pill.drop.r-N { border-color: var(--r-N); }
+.pill.drop.r-HN { border-color: var(--r-HN); color: #cfe8cf; }
+.pill.drop.r-R { border-color: var(--r-R); color: #cfe3ff; }
+.pill.drop.r-HR { border-color: var(--r-HR); color: #ead6ff; }
+.stage.adv { min-height: 250px; }
+.stage .ground { position: absolute; left: 0; right: 0; bottom: 0; height: 46px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.06) 0 18px, transparent 18px 40px); opacity: .7; }
+.stage.moving .ground { animation: scroll-ground .5s linear infinite; }
+@keyframes scroll-ground { from { background-position: 0 0; } to { background-position: -40px 0; } }
+.stepdots { position: absolute; top: 10px; left: 0; right: 0; display: flex; justify-content: center; gap: 6px; }
+.stepdots i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.2); }
+.stepdots i.done { background: rgba(224,165,38,.6); }
+.stepdots i.on { background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+.adv-center { position: absolute; left: 0; right: 96px; top: 30px; text-align: center; }
+.adv-idle { color: #cfc8b8; font-size: 13px; margin-top: 60px; padding: 0 12px; }
+.adv-text { font-size: 13px; color: #f3ead0; text-shadow: 0 1px 3px #000; margin-top: 6px; animation: fadeline .35s ease-out; }
+@keyframes fadeline { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.adv-enemy, .adv-treasure { position: relative; }
+.enemy-die { animation: enemy-die .95s ease-in forwards; }
+@keyframes enemy-die { 0% { opacity: 0; transform: translateX(30px); } 20% { opacity: 1; transform: none; } 55% { transform: translateX(-4px); } 60% { transform: translateX(4px); filter: brightness(2); } 85% { opacity: 1; } 100% { opacity: .15; transform: scale(.85); filter: grayscale(1); } }
+.fx { position: absolute; left: 50%; top: 12px; width: 90px; height: 70px; margin-left: -45px; pointer-events: none; color: var(--fx); }
+.fx > span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 40px; text-shadow: 0 0 12px var(--fx), 0 0 24px var(--fx); opacity: 0; animation-delay: .25s; animation-duration: .45s; animation-fill-mode: forwards; animation-timing-function: ease-out; }
+.fx-slash { animation-name: fx-slash; }
+@keyframes fx-slash { 0% { opacity: 0; transform: translate(-30px,-20px) rotate(-30deg) scale(.6); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(30px,20px) rotate(-30deg) scale(1.4); } }
+.fx-pierce { animation-name: fx-pierce; }
+@keyframes fx-pierce { 0% { opacity: 0; transform: translateX(70px) scaleX(1.6); } 50% { opacity: 1; transform: translateX(0) scaleX(1); } 100% { opacity: 0; transform: translateX(-20px) scale(1.3); } }
+.fx-arrow { animation-name: fx-arrow; }
+@keyframes fx-arrow { 0% { opacity: 0; transform: translateX(110px) rotate(180deg); } 60% { opacity: 1; transform: translateX(0) rotate(180deg); } 100% { opacity: 0; transform: translateX(-10px) rotate(180deg) scale(1.3); } }
+.fx-holy { animation-name: fx-holy; border-radius: 50%; }
+@keyframes fx-holy { 0% { opacity: 0; transform: scale(.3); box-shadow: 0 0 0 0 var(--fx); } 50% { opacity: 1; transform: scale(1.1); box-shadow: 0 0 0 10px transparent; } 100% { opacity: 0; transform: scale(1.8); } }
+.fx-shadow { animation-name: fx-shadow; }
+@keyframes fx-shadow { 0% { opacity: 0; transform: scale(2) rotate(90deg); filter: blur(6px); } 50% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); } 100% { opacity: 0; transform: scale(.4); } }
+.fx-burst { animation-name: fx-burst; }
+@keyframes fx-burst { 0% { opacity: 0; transform: translateY(-50px) scale(.5); } 45% { opacity: 1; transform: translateY(0) scale(.8); } 100% { opacity: 0; transform: scale(2.4); } }
+.fx-poison { animation-name: fx-poison; }
+@keyframes fx-poison { 0% { opacity: 0; transform: translateY(-30px); } 40% { opacity: 1; transform: translateY(0); } 70% { transform: translateY(8px) scale(1.2); } 100% { opacity: 0; transform: translateY(20px) scale(1.4); } }
+.fx-sun { animation-name: fx-sun; }
+@keyframes fx-sun { 0% { opacity: 0; transform: scale(.2) rotate(0); } 50% { opacity: 1; transform: scale(1.3) rotate(90deg); } 100% { opacity: 0; transform: scale(2.2) rotate(180deg); } }
+.fx-crush { animation-name: fx-crush; }
+@keyframes fx-crush { 0% { opacity: 0; transform: translateY(-60px) scale(1.4); } 50% { opacity: 1; transform: translateY(0) scale(1); } 65% { transform: translateY(0) scaleY(.7); } 100% { opacity: 0; transform: scale(1.6); } }
+.fx-eclipse { animation-name: fx-eclipse; }
+@keyframes fx-eclipse { 0% { opacity: 0; transform: scale(3); } 50% { opacity: 1; transform: scale(1); text-shadow: 0 0 30px var(--fx); } 100% { opacity: 0; transform: scale(.2); } }
+.stage.adv .walker { position: absolute; left: 22px; bottom: 30px; font-size: 26px; transform: scaleX(-1); }
+.stage.adv .walker.step { animation: bob .45s ease-out; }
+@keyframes bob { 0%,100% { margin-bottom: 0; } 50% { margin-bottom: 8px; } }
+.adv-steps { display: flex; flex-wrap: wrap; gap: 4px; }
+.pill.st-enemy { border-color: #7a3442; }
+.pill.st-treasure { border-color: var(--gold); }
+@media (prefers-reduced-motion: reduce) { .fx > span, .enemy-die, .adv-text, .stage.moving .ground, .stage.adv .walker.step { animation: none; opacity: 1; } }

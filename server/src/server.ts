@@ -124,22 +124,13 @@ export class Server {
     return view(s, c);
   }
 
-  /** 퀘스트 전투 1회 ([공격] 1탭 = 몬스터 1마리) */
-  async questBattle(chapter: number, part: number) {
+  /** 퀘스트 모험 1회 ([모험] 1탭 = 3~5스텝 자동 진행). 결과만 반환하고 클라이언트는 연출만 재생 */
+  async questAdventure(chapter: number, part: number) {
     const c = ctx();
     const s = await loadOrThrow(c);
-    const result = P.questBattle(s, Number(chapter), Number(part), c);
+    const result = P.questAdventure(s, Number(chapter), Number(part), c);
     await save(s);
     return { ...view(s, c), result };
-  }
-
-  /** 보상 상자 [계속] */
-  async questContinue() {
-    const c = ctx();
-    const s = await loadOrThrow(c);
-    P.questContinue(s);
-    await save(s);
-    return view(s, c);
   }
 
   /** 장 보스 배틀 (리더 카드 1장, 1회성) */

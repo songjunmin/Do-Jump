@@ -1,11 +1,12 @@
-// 퀘스트: [목록] → [진행: 몬스터 전투] → [보스 배틀]. 계산은 모두 서버, 여기서는 연출만.
+// 퀘스트: [목록] → [진행: 모험 1회 = 3~5스텝 자동] → [보스 배틀]. 계산은 모두 서버, 여기서는 연출만.
 import { useEffect, useRef, useState } from 'react';
 import type { Run } from '../App';
-import { canEnterPart, chapterAllCleared, leaderCard, type PlayerState, type QuestBox } from '../../server/src/game/player';
-import { CHAPTERS, DROP_BANDS, partKey, type Chapter } from '../../server/src/game/questData';
+import { canEnterPart, chapterAllCleared, leaderCard, type AdventureStep, type PlayerState, type Treasure } from '../../server/src/game/player';
+import { ADVENTURE_MAX_STEPS, ADVENTURE_MIN_STEPS, CHAPTERS, DROP_BANDS, adventureMinStamina, partKey, stepsToClear, type Chapter } from '../../server/src/game/questData';
+import { fxOf } from '../ui/fx';
 import { LEADER_HP_MULT, POINTS_PER_LEVEL } from '../../server/src/game/config';
 import { displayName, statsOf } from '../../server/src/game/cards';
-import { CURRENCY } from '../../server/src/game/data';
+import { CARD_MAP, CURRENCY } from '../../server/src/game/data';
 import type { LeaderBattleResult } from '../../server/src/game/engine';
 import { Bar, CardView, MiniCard, Modal, fmt } from '../ui/common';
 
@@ -42,6 +43,7 @@ function QuestList({ s, run, busy, chapterId, setChapterId, onEnter }: {
           <div className="muted small">리더 카드</div>
           <b>{leader ? displayName(leader) : '없음'}</b>
           {leader && <div className="small muted">공격 {fmt(statsOf(leader).atk)} · 보스전 체력 {fmt(statsOf(leader).def * LEADER_HP_MULT)}</div>}
+          {leader && <div className="small" style={{ color: fxOf(leader.cardId).color }}>공격 이펙트: {fxOf(leader.cardId).glyph} {fxOf(leader.cardId).name}</div>}
           <button className="btn sm" style={{ marginTop: 6 }} onClick={() => setPicking(true)}>변경</button>
         </div>
       </div>
@@ -69,13 +71,22 @@ function QuestList({ s, run, busy, chapterId, setChapterId, onEnter }: {
                   <b className="small">파트 {i + 1} · {p.name}</b>
                   {cleared && <span className="pill clear">클리어</span>}
                 </div>
-                <div className="muted small">{p.monster.name} · 체력 {p.stamina}</div>
+                <div className="muted small">
+                  1모험 체력 {p.stamina * ADVENTURE_MIN_STEPS}~{p.stamina * ADVENTURE_MAX_STEPS} · 파트 총 체력 약 {p.stamina * stepsToClear(p)} · 경험치 약 {p.stamina * stepsToClear(p)}
+                </div>
+                <div className="drops">
+                  {[...p.drops.base, ...p.drops.upper].map((id, j) => (
+                    <span key={j} className={`pill drop r-${CARD_MAP[id].rank}`}>{CARD_MAP[id].rank} {CARD_MAP[id].name}</span>
+                  ))}
+                  <span className="pill drop">{CURRENCY.silver.name}</span>
+                  <span className="muted small">· 적 {p.monster.glyph} {p.monster.name}</span>
+                </div>
                 <div className="row" style={{ gap: 6, marginTop: 4 }}>
                   <div className="grow"><Bar value={cleared && pct === 0 ? 100 : pct} max={100} /></div>
                   <span className="small" style={{ width: 36, textAlign: 'right' }}>{cleared && pct === 0 ? 100 : pct}%</span>
                 </div>
               </div>
-              <button className="btn sm primary" disabled={!open || !leader} onClick={() => onEnter(ch.id, i + 1)}>{cleared ? '다시' : '진행'}</button>
+              <button className="btn sm primary" disabled={!open || !leader || s.stamina < adventureMinStamina(p)} title={s.stamina < adventureMinStamina(p) ? '체력 부족' : undefined} onClick={() => onEnter(ch.id, i + 1)}>모험</button>
             </div>
           );
         })}
@@ -93,7 +104,7 @@ function QuestList({ s, run, busy, chapterId, setChapterId, onEnter }: {
           }}>{bossDone ? '완료' : '도전'}</button>
         </div>
       </div>
-      <p className="muted small">클리어한 파트는 몇 번이든 다시 돌 수 있어요(강화 재료 수급용). 속성 포인트는 파트를 처음 클리어할 때만 받습니다.</p>
+      <p className="muted small">[모험] 한 번에 3~5스텝이 자동으로 흘러가요(이동·적 조우·보물상자). 체력이 모험 최소치보다 적으면 시작할 수 없어요. 클리어한 파트는 몇 번이든 다시 돌 수 있고, 속성 포인트는 처음 클리어할 때만 받습니다.</p>
 
       {picking && (
         <Modal title="리더 카드 선택" onClose={() => setPicking(false)}>
@@ -110,30 +121,40 @@ function QuestList({ s, run, busy, chapterId, setChapterId, onEnter }: {
   );
 }
 
-/* ───────────── 진행 (몬스터 전투) ───────────── */
+/* ───────────── 진행 (모험: 3~5스텝 자동) ───────────── */
 
-interface BattleOut {
-  monster: { name: string; glyph: string; hp: number }; leaderAtk: number; hits: number; stamina: number; exp: number; silver: number; progress: number;
-  partClear: boolean; firstClear: boolean; points: number; levelUps: number; box: QuestBox | null; stopReason: string | null; bossUnlocked: boolean;
+interface AdventureOut {
+  steps: AdventureStep[]; planned: number; stamina: number; exp: number; silver: number; progress: number;
+  treasures: Treasure[]; enemies: number; partClear: boolean; firstClear: boolean; points: number; levelUps: number;
+  stopReason: string | null; outOfStamina: boolean; bossUnlocked: boolean;
 }
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 const readSkip = () => { try { return localStorage.getItem('tcg-quest-skip') === '1'; } catch { return false; } };
+const STEP_MS: Record<AdventureStep['type'], number> = { move: 520, enemy: 950, treasure: 850 };
+
+function treasureText(t: Treasure) {
+  return t.kind === 'card' ? `${t.cardName} (${t.rank})` : `${CURRENCY.silver.name} ${fmt(t.amount ?? 0)}`;
+}
 
 function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run: Run; say: Say; chapter: number; part: number; onExit: () => void }) {
   const ch = CHAPTERS.find((c) => c.id === chapter)!;
   const qp = ch.parts[part - 1];
   const key = partKey(chapter, part);
   const leader = leaderCard(s);
+  const fx = leader ? fxOf(leader.cardId) : fxOf('');
+  const minStamina = adventureMinStamina(qp);
   const [skip, setSkipState] = useState(readSkip);
   const [auto, setAuto] = useState(false);
   const [working, setWorking] = useState(false);
-  const [anim, setAnim] = useState<{ n: number; out: BattleOut } | null>(null);
+  const [cur, setCur] = useState<{ n: number; i: number; total: number; step: AdventureStep } | null>(null);
+  const [summary, setSummary] = useState<AdventureOut | null>(null);
+  const [clear, setClear] = useState<AdventureOut | null>(null);
+  const [recover, setRecover] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const [box, setBox] = useState<QuestBox | null>(s.quest.box);
-  const [clear, setClear] = useState<BattleOut | null>(null);
   const autoRef = useRef(false);
   const skipRef = useRef(skip);
+  const nRef = useRef(0);
   const pct = s.quest.progress[key] ?? 0;
 
   const setSkip = (v: boolean) => {
@@ -143,110 +164,164 @@ function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run:
   const stopAuto = () => { autoRef.current = false; setAuto(false); };
   useEffect(() => () => { autoRef.current = false; }, []);
 
-  /** 전투 1회. 정지 조건이면 false */
-  const battleOnce = async (): Promise<boolean> => {
-    const r = await run<BattleOut>('questBattle', chapter, part);
+  /** 모험 1회: 서버가 3~5스텝을 한 번에 계산 → 여기서는 스텝을 차례로 재생. 계속 진행 가능하면 true */
+  const adventureOnce = async (): Promise<boolean> => {
+    const r = await run<AdventureOut>('questAdventure', chapter, part);
     if (!r) return false;
-    setAnim((a) => ({ n: (a?.n ?? 0) + 1, out: r }));
-    const line = [`${r.monster.name} 처치`, `체력 -${r.stamina}`, `경험치 +${r.exp}`, `${CURRENCY.silver.name} +${fmt(r.silver)}`];
-    setLog((l) => [line.join(' · '), ...l].slice(0, 5));
+    if (!skipRef.current) {
+      for (let i = 0; i < r.steps.length; i++) {
+        nRef.current++;
+        setCur({ n: nRef.current, i, total: r.steps.length, step: r.steps[i] });
+        await sleep(STEP_MS[r.steps[i].type]);
+      }
+      setCur(null);
+    }
+    const parts = [`${r.steps.length}스텝`, `체력 -${r.stamina}`, `경험치 +${r.exp}`, `${CURRENCY.silver.name} +${fmt(r.silver)}`];
+    if (r.enemies) parts.push(`적 ${r.enemies}마리`);
+    for (const t of r.treasures) parts.push(`보물: ${treasureText(t)}`);
+    setLog((l) => [parts.join(' · '), ...l].slice(0, 5));
     if (r.levelUps > 0) say(`레벨 업! 속성 포인트 +${r.levelUps * POINTS_PER_LEVEL}`);
-    if (r.box) setBox(r.box);
-    if (r.partClear) setClear(r);
-    return !r.stopReason;
+    if (r.partClear) { setClear(r); return false; }
+    if (r.outOfStamina) { setRecover(true); return false; }
+    if (!autoRef.current || r.levelUps > 0) setSummary(r);
+    return r.levelUps === 0;
   };
 
-  const attack = async () => {
+  const startOne = async () => {
     if (working) return;
+    setSummary(null);
     setWorking(true);
-    await battleOnce();
-    if (!skipRef.current) await sleep(350);
+    await adventureOnce();
     setWorking(false);
   };
 
   const startAuto = async () => {
     if (working) return;
+    setSummary(null);
     autoRef.current = true;
     setAuto(true);
     setWorking(true);
     while (autoRef.current) {
-      const go = await battleOnce();
+      const go = await adventureOnce();
       if (!go) break;
-      await sleep(skipRef.current ? 150 : 600);
+      await sleep(skipRef.current ? 200 : 450);
     }
     stopAuto();
     setWorking(false);
   };
 
-  const continueBox = async () => {
-    await run('questContinue');
-    setBox(null);
-  };
-
-  const enough = s.stamina >= qp.stamina;
-  const showClear = clear && !box;
+  const enough = s.stamina >= minStamina;
+  const step = cur?.step;
 
   return (
     <div>
       <div className="row between" style={{ marginBottom: 8 }}>
-        <button className="btn sm" disabled={auto} onClick={onExit}>◀ 목록</button>
+        <button className="btn sm" disabled={working} onClick={onExit}>◀ 목록</button>
         <span className="small muted">제{ch.id}장 · 파트 {part} {qp.name}</span>
       </div>
 
-      <div className="stage" style={{ background: ch.bg }}>
-        <div className="stage-monster">
-          <div key={anim?.n} className={`mglyph${anim && !skip ? ' hit' : ''}`}>{qp.monster.glyph}</div>
-          {anim && !skip && <div key={`d${anim.n}`} className="float-dmg">-{fmt(anim.out.leaderAtk)}{anim.out.hits > 1 ? ` ×${anim.out.hits}` : ''}</div>}
-          <div className="small">{qp.monster.name}</div>
+      <div className={`stage adv${step?.type === 'move' ? ' moving' : ''}`} style={{ background: ch.bg }}>
+        <div className="ground" />
+        {cur && (
+          <div className="stepdots">
+            {Array.from({ length: cur.total }, (_, i) => <i key={i} className={i < cur.i ? 'done' : i === cur.i ? 'on' : ''} />)}
+          </div>
+        )}
+        <div className="adv-center">
+          {!step && <div className="adv-idle">{working ? '…' : '[모험]을 누르면 3~5스텝이 자동으로 진행돼요'}</div>}
+          {step?.type === 'move' && <div key={cur!.n} className="adv-text">이동 중…</div>}
+          {step?.type === 'enemy' && step.enemy && (
+            <div key={cur!.n} className="adv-enemy">
+              <div className="mglyph enemy-die">{step.enemy.glyph}</div>
+              <div className="fx" style={{ ['--fx' as any]: fx.color }}><span className={`fx-${fx.kind}`}>{fx.glyph}</span></div>
+              <div className="float-dmg">-{fmt(step.enemy.dmg)}{step.enemy.hits > 1 ? ` ×${step.enemy.hits}` : ''}</div>
+              <div className="adv-text">{step.enemy.name} 조우 → {fx.name}! 격파</div>
+            </div>
+          )}
+          {step?.type === 'treasure' && step.treasure && (
+            <div key={cur!.n} className="adv-treasure">
+              <div className="rbox-ic">{step.treasure.grade === 'gold' ? '🎁' : '📦'}</div>
+              <div className="adv-text">{step.treasure.grade === 'gold' ? '금색' : '은색'} 보물상자: {treasureText(step.treasure)}</div>
+            </div>
+          )}
         </div>
+        <div key={`w${cur?.n}`} className={`walker${step ? ' step' : ''}`}>🚶</div>
         <div className="stage-leader">{leader && <CardView c={leader} stat="atk" />}</div>
       </div>
 
       <div className="panel">
-        <div className="row between small"><span>달성도</span><span>{pct}%</span></div>
-        <Bar value={pct} max={100} />
+        <div className="row between small"><span>달성도</span><span>{cur ? cur.step.progress : pct}%</span></div>
+        <Bar value={cur ? cur.step.progress : pct} max={100} />
         <div className="row between small muted" style={{ marginTop: 6 }}>
-          <span>체력 {s.stamina} (전투당 {qp.stamina})</span>
+          <span>체력 {s.stamina} · 스텝당 {qp.stamina} · 모험 최소 {minStamina}</span>
           <span>Lv {s.level}</span>
         </div>
         <div className="row" style={{ gap: 6, marginTop: 10 }}>
-          <button className="btn primary grow" disabled={working || !enough || !!box || !leader} onClick={attack}>⚔ 공격</button>
+          <button className="btn primary grow" disabled={working || !enough || !leader} onClick={startOne}>🧭 모험</button>
           {auto
             ? <button className="btn grow" onClick={stopAuto}>■ 정지</button>
-            : <button className="btn grow" disabled={working || !enough || !!box || !leader} onClick={startAuto}>▶ Auto</button>}
+            : <button className="btn grow" disabled={working || !enough || !leader} onClick={startAuto}>▶ Auto</button>}
           <label className="btn sm skip-toggle">
             <input type="checkbox" id="quest-skip" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> Skip
           </label>
         </div>
-        {!enough && <p className="small" style={{ color: 'var(--bad)', marginBottom: 0 }}>체력이 부족합니다. 홈에서 예비 체력이나 {CURRENCY.vitality.name}를 쓰세요.</p>}
-        <p className="muted small" style={{ marginBottom: 0 }}>Auto는 체력이 떨어지거나 파트 클리어·레벨 업·보상 상자에서 멈춥니다. Skip을 켜면 연출 없이 결과만 반영해요.</p>
+        {!enough && <button className="btn sm block" style={{ marginTop: 8 }} onClick={() => setRecover(true)}>체력이 부족해요 · 회복하기</button>}
+        <p className="muted small" style={{ marginBottom: 0 }}>Auto는 체력 부족·파트 클리어·레벨 업에서 멈춰요. Skip을 켜면 스텝 연출 없이 결과만 반영해요.</p>
       </div>
 
       {log.length > 0 && <div className="panel small muted">{log.map((l, i) => <div key={i} style={{ opacity: 1 - i * 0.16 }}>• {l}</div>)}</div>}
 
-      {box && (
-        <Modal title={box.grade === 'gold' ? '금색 보상 상자' : '은색 보상 상자'} onClose={continueBox}>
-          <div className={`rbox ${box.grade}`}>
-            <div className="rbox-ic">{box.grade === 'gold' ? '🎁' : '📦'}</div>
-            {box.kind === 'card'
-              ? <div><b>{box.cardName}</b> <span className="pill">{box.rank}</span></div>
-              : <div><b>{CURRENCY.silver.name} {fmt(box.amount ?? 0)}</b></div>}
-            <div className="muted small">{box.grade === 'gold' ? '금색 상자는 상위 등급 카드가 확정이에요.' : '은색 상자는 낮은 확률로 상위 등급 카드가 나와요.'}</div>
+      {summary && (
+        <Modal title="모험 결과" onClose={() => setSummary(null)}>
+          <AdventureSummary r={summary} />
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn primary grow" disabled={!enough} onClick={startOne}>계속</button>
+            <button className="btn" onClick={onExit}>목록</button>
           </div>
-          <button className="btn primary block" onClick={continueBox}>계속</button>
         </Modal>
       )}
-      {showClear && clear && (
+      {clear && (
         <Modal title="파트 클리어!" onClose={onExit}>
-          <p>{qp.name} 달성도 100%</p>
+          <AdventureSummary r={clear} />
           {clear.firstClear ? <p>속성 포인트 <b>+{clear.points}</b> (홈에서 공격·방어 코스트에 분배)</p> : <p className="muted small">재진행 클리어는 속성 포인트를 주지 않아요.</p>}
           {clear.bossUnlocked && <p className="hint">이 장의 보스 배틀이 열렸습니다!</p>}
+          <button className="btn primary block" onClick={onExit}>목록으로</button>
+        </Modal>
+      )}
+      {recover && !clear && (
+        <Modal title="체력 부족" onClose={() => setRecover(false)}>
+          <p className="small">모험을 시작하려면 체력 {minStamina} 이상이 필요해요. 지금 체력 {s.stamina}.</p>
+          <div className="row wrap" style={{ gap: 6 }}>
+            <button className="btn" disabled={s.staminaReserve <= 0} onClick={async () => { const r = await run<any>('claimReserve'); if (r) say(`예비 체력 ${r.amount} 수령`); }}>예비 체력 수령 ({s.staminaReserve})</button>
+            <button className="btn" disabled={s.vitality <= 0} onClick={() => run('useVitality')}>{CURRENCY.vitality.name} 사용 ({s.vitality}개)</button>
+          </div>
+          <p className="muted small">체력은 1분에 1씩 회복돼요.</p>
           <div className="row" style={{ gap: 6 }}>
-            <button className="btn primary grow" onClick={onExit}>목록으로</button>
-            <button className="btn" onClick={() => setClear(null)}>여기서 계속</button>
+            <button className="btn primary grow" disabled={!enough} onClick={() => { setRecover(false); startOne(); }}>모험 계속</button>
+            <button className="btn" onClick={onExit}>목록</button>
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+function AdventureSummary({ r }: { r: AdventureOut }) {
+  return (
+    <div className="panel">
+      <div className="adv-steps">
+        {r.steps.map((st, i) => (
+          <span key={i} className={`pill st-${st.type}`}>{st.type === 'move' ? '🚶 이동' : st.type === 'enemy' ? `${st.enemy?.glyph} 격파` : `${st.treasure?.grade === 'gold' ? '🎁' : '📦'} 보물`}</span>
+        ))}
+      </div>
+      <dl className="kv" style={{ marginTop: 8 }}>
+        <dt>체력</dt><dd>-{r.stamina}</dd>
+        <dt>경험치</dt><dd>+{r.exp}</dd>
+        <dt>{CURRENCY.silver.name}</dt><dd>+{fmt(r.silver)}</dd>
+        <dt>달성도</dt><dd>{r.progress}%</dd>
+      </dl>
+      {r.levelUps > 0 && <div className="hint" style={{ marginTop: 8 }}>레벨 업! 속성 포인트 +{r.levelUps * POINTS_PER_LEVEL}</div>}
+      {r.treasures.length > 0 && <div className="small" style={{ marginTop: 6 }}>{r.treasures.map((t, i) => <div key={i}>{t.grade === 'gold' ? '🎁' : '📦'} {treasureText(t)}</div>)}</div>}
     </div>
   );
 }

@@ -58,8 +58,6 @@ export const playerExpToNext = (level: number) => 50 + level * 25;
 
 /** 퀘스트 (§5.1) */
 export const QUEST_SILVER_PER_STAMINA = 300;
-export const QUEST_BOX_MIN = 3;
-export const QUEST_BOX_MAX = 5;
 /** 보스전에서 리더 카드의 체력 = 방어력 × 배수 */
 export const LEADER_HP_MULT = 3;
 export const LEADER_MAX_TURNS = 40;

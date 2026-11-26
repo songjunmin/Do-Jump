@@ -1,5 +1,6 @@
 // 퀘스트 장·파트·보스 데이터 (§5.1). 이름은 임시 오리지널.
 import type { Rank } from './config';
+import { CARDS } from './data';
 
 export type DropBand = 'early' | 'mid' | 'late';
 
@@ -12,12 +13,24 @@ export const DROP_BANDS: Record<DropBand, { label: string; base: Rank; upper: Ra
 
 export interface QuestPart {
   name: string;
-  /** 전투 1회당 체력 소모 (10~15) */
+  /** 스텝 1회당 체력 소모 (10~15) */
   stamina: number;
-  /** 전투 1회당 달성도 상승 % */
+  /** 스텝 1회당 달성도 상승 % (파트 ≈ 12~15스텝 ≈ 체력 150) */
   gain: number;
+  /** 이 파트에서 만나는 적 */
   monster: { name: string; glyph: string; hp: number };
+  /** 이 파트의 보물상자 드랍 (스테이지마다 고정) */
+  drops: { base: string[]; upper: string[] };
 }
+
+/** 스텝 이벤트 확률 */
+export const STEP_EVENTS = { move: 0.5, enemy: 0.35, treasure: 0.15 };
+export const ADVENTURE_MIN_STEPS = 3;
+export const ADVENTURE_MAX_STEPS = 5;
+/** 파트 완료까지 필요한 스텝 수 */
+export const stepsToClear = (part: QuestPart) => Math.ceil(100 / part.gain);
+/** 1모험 최소 체력 */
+export const adventureMinStamina = (part: QuestPart) => part.stamina * ADVENTURE_MIN_STEPS;
 
 export interface QuestBoss { name: string; glyph: string; hp: number; atk: number }
 
@@ -31,8 +44,11 @@ export interface Chapter {
   boss: QuestBoss;
 }
 
-const p = (name: string, stamina: number, gain: number, mName: string, glyph: string, hp: number): QuestPart =>
-  ({ name, stamina, gain, monster: { name: mName, glyph, hp } });
+// 파트 길이: 체력 한 통(150)으로 파트 하나 → 12~15스텝
+const p = (name: string, stamina: number, _legacyGain: number, mName: string, glyph: string, hp: number): QuestPart => {
+  const steps = Math.max(12, Math.min(15, Math.round(150 / stamina)));
+  return { name, stamina, gain: Math.ceil(100 / steps), monster: { name: mName, glyph, hp }, drops: { base: [], upper: [] } };
+};
 
 export const CHAPTERS: Chapter[] = [
   {
@@ -106,3 +122,17 @@ export const CHAPTERS: Chapter[] = [
 ];
 
 export const partKey = (chapter: number, part: number) => `${chapter}-${part}`;
+
+// 드랍 풀: 장의 구간(초반/중반/후반) 등급에서 파트마다 다른 조합을 고정 배정
+for (const ch of CHAPTERS) {
+  const band = DROP_BANDS[ch.band];
+  const base = CARDS.filter((c) => c.rank === band.base).map((c) => c.id);
+  const upper = CARDS.filter((c) => c.rank === band.upper).map((c) => c.id);
+  ch.parts.forEach((part, i) => {
+    const o = (ch.id * 7 + i * 3) % Math.max(1, base.length);
+    part.drops = {
+      base: [base[o % base.length], base[(o + 1) % base.length]],
+      upper: [upper[(ch.id + i) % upper.length]],
+    };
+  });
+}
