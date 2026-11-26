@@ -10,11 +10,13 @@ import Cards from './screens/Cards';
 import Deck from './screens/Deck';
 import Duel from './screens/Duel';
 import Raid from './screens/Raid';
+import Quest from './screens/Quest';
 
 export type Run = <R = any>(fn: string, ...args: any[]) => Promise<R | undefined>;
-type Tab = 'home' | 'cards' | 'deck' | 'duel' | 'raid';
+type Tab = 'home' | 'quest' | 'cards' | 'deck' | 'duel' | 'raid';
 const TABS: { id: Tab; label: string; ic: string }[] = [
   { id: 'home', label: '홈', ic: '🏠' },
+  { id: 'quest', label: '퀘스트', ic: '🗺' },
   { id: 'cards', label: '카드', ic: '🃏' },
   { id: 'deck', label: '덱', ic: '🗂' },
   { id: 'duel', label: '결투장', ic: '⚔' },
@@ -100,6 +102,7 @@ export default function App() {
           </div>
         )}
         {tab === 'home' && <Home s={s} run={run} busy={busy} say={say} />}
+        {tab === 'quest' && <Quest s={s} run={run} busy={busy} say={say} />}
         {tab === 'cards' && <Cards s={s} run={run} busy={busy} say={say} />}
         {tab === 'deck' && <Deck s={s} run={run} busy={busy} />}
         {tab === 'duel' && <Duel s={s} run={run} busy={busy} />}

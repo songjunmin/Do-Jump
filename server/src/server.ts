@@ -124,12 +124,39 @@ export class Server {
     return view(s, c);
   }
 
-  async questStep() {
+  /** 퀘스트 전투 1회 ([공격] 1탭 = 몬스터 1마리) */
+  async questBattle(chapter: number, part: number) {
     const c = ctx();
     const s = await loadOrThrow(c);
-    const result = P.questStep(s, c);
+    const result = P.questBattle(s, Number(chapter), Number(part), c);
     await save(s);
     return { ...view(s, c), result };
+  }
+
+  /** 보상 상자 [계속] */
+  async questContinue() {
+    const c = ctx();
+    const s = await loadOrThrow(c);
+    P.questContinue(s);
+    await save(s);
+    return view(s, c);
+  }
+
+  /** 장 보스 배틀 (리더 카드 1장, 1회성) */
+  async questBoss(chapter: number) {
+    const c = ctx();
+    const s = await loadOrThrow(c);
+    const result = P.questBoss(s, Number(chapter), c);
+    await save(s);
+    return { ...view(s, c), result };
+  }
+
+  async setLeader(uid: string) {
+    const c = ctx();
+    const s = await loadOrThrow(c);
+    P.setLeader(s, String(uid));
+    await save(s);
+    return view(s, c);
   }
 
   async protoSupply() {

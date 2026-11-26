@@ -3,7 +3,8 @@ import * as C from './config';
 import { BOSSES, BOTS, CARDS, CARD_MAP, type FactionId } from './data';
 import { displayName, isMaxed, master, newInstance, rankOf, toBattleCard, type BattleCard, type CardInstance } from './cards';
 import { applyEnhance, applyEvolve } from './growth';
-import { duel as runDuel, raidEngage as runRaid, type DuelResult, type RaidResult, type Rng } from './engine';
+import { duel as runDuel, raidEngage as runRaid, leaderBattle, type DuelResult, type RaidResult, type Rng } from './engine';
+import { CHAPTERS, DROP_BANDS, partKey, type Chapter } from './questData';
 
 export type DeckIds = (string | null)[];
 export interface Preset { name: string; atk: DeckIds; def: DeckIds }
@@ -32,7 +33,7 @@ export interface PlayerState {
   seq: number;
   presets: Preset[];
   activePreset: number;
-  quest: { chapter: number; part: number; step: number; actions: number };
+  quest: QuestState;
   duel: { score: number; weekKey: number; bestTier: number; dayKey: number; used: number; wins: number; losses: number; recent: Record<string, number> };
   raid: { boss: PersonalBoss | null; kills: number; engagements: number };
   flags: { evolveHintShown: boolean };
@@ -41,6 +42,28 @@ export interface PlayerState {
 }
 
 export interface Ctx { now: number; rng: Rng }
+
+/** 퀘스트 보상 상자. 생성 시점에 서버가 이미 지급했고, [계속]을 누를 때까지 진행을 멈춘다 */
+export interface QuestBox { grade: 'silver' | 'gold'; kind: 'card' | 'silver'; cardName?: string; cardUid?: string; rank?: string; amount?: number }
+
+export interface QuestState {
+  v: 2;
+  /** 진행 가능한 최고 장 */
+  unlocked: number;
+  /** 파트 달성도 (현재 회차, 0~100) */
+  progress: Record<string, number>;
+  /** 파트 최초 클리어 여부 */
+  cleared: Record<string, boolean>;
+  /** 장 보스 클리어 여부 (1회성) */
+  bossCleared: Record<string, boolean>;
+  /** 마지막 상자 이후 전투 수 */
+  battles: number;
+  /** 다음 상자까지 필요한 전투 수 (3~5) */
+  nextBox: number;
+  box: QuestBox | null;
+  /** 리더 카드 uid */
+  leader: string | null;
+}
 
 const emptyDeck = (): DeckIds => [null, null, null, null, null];
 const dayKey = (now: number) => Math.floor((now + C.TZ_OFFSET_MS) / 86_400_000);
@@ -76,7 +99,7 @@ export function createPlayer(name: string, faction: FactionId, ctx: Ctx): Player
     cards: [], seq: 0,
     presets: [0, 1, 2].map((i) => ({ name: ['결투장', '레이드', '예비'][i], atk: emptyDeck(), def: emptyDeck() })),
     activePreset: 0,
-    quest: { chapter: 1, part: 1, step: 0, actions: 0 },
+    quest: initQuest(),
     duel: { score: 0, weekKey: weekKey(ctx.now), bestTier: 0, dayKey: dayKey(ctx.now), used: 0, wins: 0, losses: 0, recent: {} },
     raid: { boss: null, kills: 0, engagements: 0 },
     flags: { evolveHintShown: false },
@@ -96,6 +119,7 @@ export function createPlayer(name: string, faction: FactionId, ctx: Ctx): Player
   // 3번 슬롯(확정 발동)에 스킬 카드를 둔다
   const toDeck = (idx: number[]): DeckIds => [given[idx[0]], given[idx[1]], given[idx[2]], given[idx[3]], null];
   for (const p of [s.presets[0], s.presets[1]]) { p.atk = toDeck(st.atk); p.def = toDeck(st.def); }
+  s.quest.leader = s.presets[0].atk[2];
   spawnBoss(s, ctx);
   return s;
 }
@@ -103,6 +127,8 @@ export function createPlayer(name: string, faction: FactionId, ctx: Ctx): Player
 /** 시간 경과 회복·리셋을 반영한다. 매 호출 시작 시 실행 */
 export function tick(s: PlayerState, ctx: Ctx): void {
   const now = ctx.now;
+  if (!s.quest || (s.quest as any).v !== 2) { s.quest = initQuest(); s.quest.leader = s.presets[0]?.atk[2] ?? s.cards[0]?.uid ?? null; }
+  if (s.quest.leader && !s.cards.some((c) => c.uid === s.quest.leader)) s.quest.leader = null;
   // 체력: 1분당 1, 상한 초과분은 예비 풀로
   const gained = Math.floor((now - s.staminaAt) / C.STAMINA_REGEN_MS);
   if (gained > 0) {
@@ -168,6 +194,7 @@ function removeCards(s: PlayerState, uids: string[]) {
 function assertMaterial(s: PlayerState, mat: CardInstance) {
   if (mat.locked) throw new Error(`${master(mat.cardId).name}은(는) 보호 중인 카드입니다.`);
   if (cardsInDecks(s).has(mat.uid)) throw new Error(`${master(mat.cardId).name}은(는) 덱에 편성된 카드입니다.`);
+  if (s.quest.leader === mat.uid) throw new Error(`${master(mat.cardId).name}은(는) 퀘스트 리더 카드입니다.`);
 }
 
 export function enhance(s: PlayerState, targetUid: string, materialUids: string[]) {
@@ -278,41 +305,128 @@ function addPlayerExp(s: PlayerState, exp: number): number {
   return ups;
 }
 
-/** 퀘스트 행동 1회 (§5.1) */
-export function questStep(s: PlayerState, ctx: Ctx) {
-  if (s.stamina < C.QUEST_STAMINA) throw new Error('체력이 부족합니다.');
-  s.stamina -= C.QUEST_STAMINA;
-  s.quest.actions++;
-  s.quest.step++;
-  const silver = C.QUEST_STAMINA * C.QUEST_SILVER_PER_STAMINA;
-  s.silver += silver;
-  const levelUps = addPlayerExp(s, C.QUEST_STAMINA);
-  const out: { silver: number; levelUps: number; card?: string; cardName?: string; partClear?: boolean; chapterClear?: boolean; vitality?: number; full?: boolean } = { silver, levelUps };
-  // 3~5회마다 카드 보상. 장이 진행될수록 상위 등급
-  if (s.quest.actions % C.QUEST_REWARD_EVERY === 0) {
-    const ch = s.quest.chapter;
-    const rRate = Math.min(0.3, 0.05 * ch);
-    const id = ctx.rng() < rRate ? pick(cardsOf('R'), ctx.rng) : pick(cardsOf('N'), ctx.rng);
-    const inst = grantCard(s, id, ctx.now);
-    if (inst) { out.card = inst.uid; out.cardName = displayName(inst); } else out.full = true;
+export function initQuest(): QuestState {
+  return { v: 2, unlocked: 1, progress: {}, cleared: {}, bossCleared: {}, battles: 0, nextBox: 4, box: null, leader: null };
+}
+
+function chapterOf(id: number): Chapter {
+  const ch = CHAPTERS.find((c) => c.id === id);
+  if (!ch) throw new Error('없는 장입니다.');
+  return ch;
+}
+
+export function leaderCard(s: PlayerState): CardInstance | null {
+  return s.quest.leader ? s.cards.find((c) => c.uid === s.quest.leader) ?? null : null;
+}
+
+export function setLeader(s: PlayerState, uid: string) {
+  findCard(s, uid);
+  s.quest.leader = uid;
+}
+
+export const chapterAllCleared = (s: PlayerState, ch: Chapter) => ch.parts.every((_, i) => s.quest.cleared[partKey(ch.id, i + 1)]);
+
+/** 파트 진입 가능 여부: 해금된 장이고, 처음이면 앞 파트를 클리어했어야 한다 */
+export function canEnterPart(s: PlayerState, chapter: number, part: number): boolean {
+  if (chapter > s.quest.unlocked) return false;
+  if (s.quest.cleared[partKey(chapter, part)]) return true;
+  return part === 1 || !!s.quest.cleared[partKey(chapter, part - 1)];
+}
+
+function rollBox(s: PlayerState, ch: Chapter, stamina: number, ctx: Ctx): QuestBox {
+  const band = DROP_BANDS[ch.band];
+  const gold = ctx.rng() < 0.15;
+  let rank: string | null = null;
+  if (gold) rank = band.upper;
+  else if (ctx.rng() < 0.55) rank = ctx.rng() < 0.12 ? band.upper : band.base;
+  if (rank) {
+    const inst = grantCard(s, pick(cardsOf(rank), ctx.rng), ctx.now);
+    if (inst) return { grade: gold ? 'gold' : 'silver', kind: 'card', cardName: displayName(inst), cardUid: inst.uid, rank };
   }
-  if (s.quest.step >= C.QUEST_STEPS_PER_PART) {
-    s.quest.step = 0;
-    s.statPoints += C.POINTS_PER_PART;
-    out.partClear = true;
-    s.quest.part++;
-    if (s.quest.part > C.QUEST_PARTS_PER_CHAPTER) {
-      s.quest.part = 1;
-      s.quest.chapter++;
-      s.vitality++;
-      out.chapterClear = true;
-      out.vitality = 1;
-      // 금색 보상칸: 상위 등급 카드 확정
-      const inst = grantCard(s, pick(s.quest.chapter >= 4 ? cardsOf('HR') : cardsOf('R'), ctx.rng), ctx.now);
-      if (inst) { out.card = inst.uid; out.cardName = displayName(inst); }
+  const amount = stamina * C.QUEST_SILVER_PER_STAMINA * 2;
+  s.silver += amount;
+  return { grade: gold ? 'gold' : 'silver', kind: 'silver', amount };
+}
+
+/** 퀘스트 전투 1회: [공격] 1탭 = 몬스터 1마리 (§5.1) */
+export function questBattle(s: PlayerState, chapter: number, part: number, ctx: Ctx) {
+  const ch = chapterOf(chapter);
+  const qp = ch.parts[part - 1];
+  if (!qp) throw new Error('없는 파트입니다.');
+  if (!canEnterPart(s, chapter, part)) throw new Error('아직 열리지 않은 파트입니다.');
+  if (s.quest.box) throw new Error('보상 상자를 먼저 확인하세요.');
+  const leader = leaderCard(s);
+  if (!leader) throw new Error('리더 카드를 먼저 정하세요.');
+  if (s.stamina < qp.stamina) throw new Error('체력이 부족합니다.');
+  const key = partKey(chapter, part);
+  if ((s.quest.progress[key] ?? 0) >= 100) s.quest.progress[key] = 0; // 클리어한 파트 재진행
+
+  s.stamina -= qp.stamina;
+  const silver = qp.stamina * C.QUEST_SILVER_PER_STAMINA;
+  s.silver += silver;
+  const levelUps = addPlayerExp(s, qp.stamina);
+  const atk = toBattleCard(leader).atk;
+  const hits = Math.max(1, Math.ceil(qp.monster.hp / Math.max(1, atk)));
+  const progress = Math.min(100, (s.quest.progress[key] ?? 0) + qp.gain);
+  s.quest.progress[key] = progress;
+
+  let partClear = false;
+  let firstClear = false;
+  let points = 0;
+  if (progress >= 100) {
+    partClear = true;
+    if (!s.quest.cleared[key]) {
+      firstClear = true;
+      s.quest.cleared[key] = true;
+      s.statPoints += C.POINTS_PER_PART;
+      points = C.POINTS_PER_PART;
     }
   }
-  return out;
+
+  // 3~5회 전투마다 보상 상자
+  s.quest.battles++;
+  let box: QuestBox | null = null;
+  if (s.quest.battles >= s.quest.nextBox) {
+    s.quest.battles = 0;
+    s.quest.nextBox = C.QUEST_BOX_MIN + Math.floor(ctx.rng() * (C.QUEST_BOX_MAX - C.QUEST_BOX_MIN + 1));
+    box = rollBox(s, ch, qp.stamina, ctx);
+    s.quest.box = box;
+  }
+
+  const stopReason = partClear ? 'partClear' : levelUps > 0 ? 'levelUp' : box ? 'box' : s.stamina < qp.stamina ? 'stamina' : null;
+  return {
+    monster: qp.monster, leaderAtk: atk, hits, stamina: qp.stamina, exp: qp.stamina, silver, progress,
+    partClear, firstClear, points, levelUps, box, stopReason,
+    bossUnlocked: firstClear && chapterAllCleared(s, ch) && !s.quest.bossCleared[String(chapter)],
+  };
+}
+
+/** 보상 상자를 닫고 진행을 재개한다 */
+export function questContinue(s: PlayerState) {
+  s.quest.box = null;
+}
+
+/** 장 보스 배틀: 리더 카드 1장으로 자동 턴제. 승리해야 다음 장 해금, 클리어 후 재도전 불가 */
+export function questBoss(s: PlayerState, chapter: number, ctx: Ctx) {
+  const ch = chapterOf(chapter);
+  if (chapter > s.quest.unlocked) throw new Error('아직 열리지 않은 장입니다.');
+  if (!chapterAllCleared(s, ch)) throw new Error('모든 파트를 100% 완료해야 보스에 도전할 수 있습니다.');
+  if (s.quest.bossCleared[String(chapter)]) throw new Error('이미 클리어한 보스입니다.');
+  const leader = leaderCard(s);
+  if (!leader) throw new Error('리더 카드를 먼저 정하세요.');
+  const result = leaderBattle(toBattleCard(leader), ch.boss);
+  let reward: { vitality: number; cardName?: string; nextChapter?: number } | undefined;
+  if (result.win) {
+    s.quest.bossCleared[String(chapter)] = true;
+    const next = CHAPTERS.find((c) => c.id === chapter + 1);
+    if (next) s.quest.unlocked = Math.max(s.quest.unlocked, next.id);
+    // 장 클리어 보상: 활력수 + 상위 등급 카드 확정
+    s.vitality += 1;
+    reward = { vitality: 1, nextChapter: next?.id };
+    const inst = grantCard(s, pick(cardsOf(DROP_BANDS[ch.band].upper), ctx.rng), ctx.now);
+    if (inst) reward.cardName = displayName(inst);
+  }
+  return { result, boss: ch.boss, reward };
 }
 
 /** 프로토타입 전용: 성장 사이클을 빠르게 확인하기 위한 보급 */

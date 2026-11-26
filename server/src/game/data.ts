@@ -47,7 +47,7 @@ const c = (
 ): CardMaster => ({ id, name, title, rank, faction, style, cost, maxAtk, maxDef, skill, glyph });
 
 /**
- * 더미 카드 18종 (N 6 / R 7 / HR 5).
+ * 더미 카드 22종 (N 6 / HN 4 / R 7 / HR 5).
  * 스킬이 있는 카드는 스탯 총합을 조금 낮게, 무스킬 카드는 높게 책정했다.
  */
 export const CARDS: CardMaster[] = [
@@ -58,6 +58,11 @@ export const CARDS: CardMaster[] = [
   c('n_minion', '그림자 졸개', '교활한', 'N', 'dusk', 'atk', 4, 950, 550, null, '🗡'),
   c('n_thrower', '황혼 투척병', '숙련된', 'N', 'dusk', 'bal', 4, 760, 740, null, '💣'),
   c('n_gate', '결사 문지기', '굳건한', 'N', 'dusk', 'def', 5, 580, 980, null, '🛡'),
+  // HN
+  c('hn_squire', '새벽 종자', '충직한', 'HN', 'dawn', 'atk', 6, 1350, 900, null, '⚔'),
+  c('hn_medic', '들판 치유사', '자애로운', 'HN', 'dawn', 'def', 6, 850, 1400, null, '✚'),
+  c('hn_cutthroat', '골목 칼잡이', '악명 높은', 'HN', 'dusk', 'atk', 6, 1400, 850, null, '🗡'),
+  c('hn_lookout', '망루 감시자', '잠들지 않는', 'HN', 'dusk', 'def', 6, 880, 1380, null, '👁'),
   // R
   c('r_lancer', '창기병 카엘', '여명의 창', 'R', 'dawn', 'atk', 11, 2900, 1900, 'rally', '⚔'),
   c('r_nun', '방패수녀 엘린', '은빛 서약', 'R', 'dawn', 'def', 11, 1850, 2950, 'bulwark', '✚'),

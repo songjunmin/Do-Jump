@@ -1,5 +1,5 @@
 // 전투 엔진 (§3). 서버에서만 호출한다. 클라이언트는 결과를 받아 연출만 재생한다.
-import { FACTION_BONUS, MAX_SKILLS_APPLIED, SLOT_CHANCE, SLOT_PRIORITY } from './config';
+import { FACTION_BONUS, LEADER_HP_MULT, LEADER_MAX_TURNS, MAX_SKILLS_APPLIED, SLOT_CHANCE, SLOT_PRIORITY } from './config';
 import { SKILLS, type FactionId, type SkillType } from './data';
 import type { BattleCard } from './cards';
 
@@ -142,4 +142,32 @@ export function raidEngage(
     defense: { deck: defDeck, faction, rolls: d.rolls, applied: d.applied, base: defBase, mult: defMult, total: poolStart },
     bossPower: boss.power, bossHpBefore: boss.hp, bossHpAfter: hp, hits, dealt, killed: hp <= 0, timeline,
   };
+}
+
+export interface LeaderBattleResult {
+  leader: BattleCard;
+  leaderHp: number;
+  bossHp: number;
+  win: boolean;
+  turns: { by: 'leader' | 'boss'; dmg: number; leaderHp: number; bossHp: number }[];
+}
+
+/**
+ * 퀘스트 장 보스전: 리더 카드 1장 vs 보스, 자동 턴제.
+ * 리더 체력 = 방어력 × 3. 리더가 먼저 공격하고, 정해진 턴 안에 쓰러뜨리지 못하면 패배.
+ */
+export function leaderBattle(leader: BattleCard, boss: { hp: number; atk: number }): LeaderBattleResult {
+  let lhp = Math.round(leader.def * LEADER_HP_MULT);
+  let bhp = boss.hp;
+  const turns: LeaderBattleResult['turns'] = [];
+  for (let i = 0; i < LEADER_MAX_TURNS && lhp > 0 && bhp > 0; i++) {
+    const d = Math.min(leader.atk, bhp);
+    bhp -= d;
+    turns.push({ by: 'leader', dmg: d, leaderHp: lhp, bossHp: bhp });
+    if (bhp <= 0) break;
+    const e = Math.min(boss.atk, lhp);
+    lhp -= e;
+    turns.push({ by: 'boss', dmg: e, leaderHp: lhp, bossHp: bhp });
+  }
+  return { leader, leaderHp: Math.round(leader.def * LEADER_HP_MULT), bossHp: boss.hp, win: bhp <= 0, turns };
 }

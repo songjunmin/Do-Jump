@@ -9,11 +9,12 @@ index.html, vite.config.ts      Vite + React 클라이언트
 src/
   api/index.ts                  서버 호출 계층 (Verse8: @agent8/gameserver remoteFunction)
   api/localServer.ts            오프라인 미리보기 전용: 같은 서버 코드를 브라우저에서 실행
-  screens/                      홈(퀘스트) · 카드(강화/진화) · 덱 · 결투장 · 레이드 · 전투 연출
+  screens/                      홈 · 퀘스트(목록/진행/보스) · 카드(강화/진화) · 덱 · 결투장 · 레이드 · 전투 연출
 server/
   src/server.ts                 Verse8 게임 서버 (remote function 모음). 빌드 결과: server/dist/server.js
   src/game/config.ts            밸런스 상수 (기획서 수치)
-  src/game/data.ts              진형 · 화폐 · 스킬 · 카드 18종 · 보스 · 결투장 봇
+  src/game/data.ts              진형 · 화폐 · 스킬 · 카드 22종 · 보스 · 결투장 봇
+  src/game/questData.ts         퀘스트 6장 · 파트 · 몬스터 · 장 보스 · 구간별 드랍
   src/game/cards.ts             카드 인스턴스, 스탯 계산
   src/game/engine.ts            duel(), raidEngage(), rollSkills()
   src/game/growth.ts            강화 · 진화
@@ -59,6 +60,15 @@ Verse8에 올릴 때는 verse8 MCP의 `verse8_attach` → `verse8_preview` → `
 | 큐어워터 | 활력수 |
 | 진형 2개 (미결) | 새벽 기사단 / 황혼 결사 |
 
+## 퀘스트
+
+- 목록: 장별 파트 5~6개, 파트별 달성도 %, 클리어한 파트도 재진행 가능
+- 진행: [공격] 1회 = 몬스터 1마리 전투. 체력 10~15 소모, 경험치 = 소모 체력, 은화 = 소모 체력 × 300, 달성도 상승
+- 3~5회 전투마다 보상 상자(은색/금색). [계속]을 누를 때까지 진행 정지
+- 파트 첫 클리어 시 속성 포인트 +1 (재진행은 지급 없음)
+- Auto: 체력 부족·파트 클리어·레벨 업·상자에서 정지. Skip: 연출 없이 결과만 반영
+- 장 보스: 모든 파트 완료 시 해금, 리더 카드 1장 자동 턴제, 승리해야 다음 장 해금, 클리어 후 재도전 불가
+
 ## 프로토타입 전용 기능
 
 `server/src/game/config.ts`의 `PROTOTYPE_MODE = true`일 때만 동작합니다. 출시 전 `false`로 바꿉니다.
@@ -68,4 +78,4 @@ Verse8에 올릴 때는 verse8 MCP의 `verse8_attach` → `verse8_preview` → `
 
 ## 미구현 (다음 단계)
 
-주간 공유 보스, 뽑기·천장, 파편(분해·사본), 퀘스트 장 보스전(리더 카드), 동료 초대, 진형 변경 과금, 결투장 주간 보상 상세.
+주간 공유 보스, 뽑기·천장, 파편(분해·사본), 동료 초대, 진형 변경 과금, 결투장 주간 보상 상세.
