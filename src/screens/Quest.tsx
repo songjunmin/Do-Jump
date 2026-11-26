@@ -1,4 +1,4 @@
-// 퀘스트: [목록] → [진행: 몬스터 전투] → [보스 배틀]. 계산은 모두 서버, 여기서는 연출만.
+// 퀘스트: [목록] → [진행: 탭마다 탐색] → [보스 배틀]. 계산은 모두 서버, 여기서는 연출만.
 import { useEffect, useRef, useState } from 'react';
 import type { Run } from '../App';
 import { canEnterPart, chapterAllCleared, leaderCard, type PlayerState, type QuestBox } from '../../server/src/game/player';
@@ -63,13 +63,13 @@ function QuestList({ s, run, busy, chapterId, setChapterId, onEnter }: {
           const open = canEnterPart(s, ch.id, i + 1);
           return (
             <div key={key} className={`qpart${open ? '' : ' locked'}`}>
-              <div className="qglyph">{open ? p.monster.glyph : '🔒'}</div>
+              <div className="qglyph">{open ? p.glyph : '🔒'}</div>
               <div className="grow" style={{ minWidth: 0 }}>
                 <div className="row between">
                   <b className="small">파트 {i + 1} · {p.name}</b>
                   {cleared && <span className="pill clear">클리어</span>}
                 </div>
-                <div className="muted small">{p.monster.name} · 체력 {p.stamina}</div>
+                <div className="muted small">탐색 1회 체력 {p.stamina}</div>
                 <div className="row" style={{ gap: 6, marginTop: 4 }}>
                   <div className="grow"><Bar value={cleared && pct === 0 ? 100 : pct} max={100} /></div>
                   <span className="small" style={{ width: 36, textAlign: 'right' }}>{cleared && pct === 0 ? 100 : pct}%</span>
@@ -110,12 +110,19 @@ function QuestList({ s, run, busy, chapterId, setChapterId, onEnter }: {
   );
 }
 
-/* ───────────── 진행 (몬스터 전투) ───────────── */
+/* ───────────── 진행 (탐색) ───────────── */
 
-interface BattleOut {
-  monster: { name: string; glyph: string; hp: number }; leaderAtk: number; hits: number; stamina: number; exp: number; silver: number; progress: number;
+interface ExploreOut {
+  stamina: number; exp: number; silver: number; progress: number;
   partClear: boolean; firstClear: boolean; points: number; levelUps: number; box: QuestBox | null; stopReason: string | null; bossUnlocked: boolean;
 }
+
+/** 탐색 연출 문구 (표시용) */
+const EXPLORE_LINES = [
+  '길을 따라 앞으로 나아갔다', '수풀을 헤치고 지나갔다', '낡은 표지판을 발견했다', '발자국을 따라갔다',
+  '무너진 담장을 넘었다', '주변을 살피며 걸었다', '쉬어 갈 곳을 찾았다', '희미한 빛을 따라갔다',
+  '지도를 다시 확인했다', '갈림길에서 길을 골랐다',
+];
 
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 const readSkip = () => { try { return localStorage.getItem('tcg-quest-skip') === '1'; } catch { return false; } };
@@ -128,10 +135,10 @@ function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run:
   const [skip, setSkipState] = useState(readSkip);
   const [auto, setAuto] = useState(false);
   const [working, setWorking] = useState(false);
-  const [anim, setAnim] = useState<{ n: number; out: BattleOut } | null>(null);
+  const [anim, setAnim] = useState<{ n: number; line: string } | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [box, setBox] = useState<QuestBox | null>(s.quest.box);
-  const [clear, setClear] = useState<BattleOut | null>(null);
+  const [clear, setClear] = useState<ExploreOut | null>(null);
   const autoRef = useRef(false);
   const skipRef = useRef(skip);
   const pct = s.quest.progress[key] ?? 0;
@@ -143,12 +150,13 @@ function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run:
   const stopAuto = () => { autoRef.current = false; setAuto(false); };
   useEffect(() => () => { autoRef.current = false; }, []);
 
-  /** 전투 1회. 정지 조건이면 false */
-  const battleOnce = async (): Promise<boolean> => {
-    const r = await run<BattleOut>('questBattle', chapter, part);
+  /** 탐색 1회. 정지 조건이면 false */
+  const exploreOnce = async (): Promise<boolean> => {
+    const r = await run<ExploreOut>('questExplore', chapter, part);
     if (!r) return false;
-    setAnim((a) => ({ n: (a?.n ?? 0) + 1, out: r }));
-    const line = [`${r.monster.name} 처치`, `체력 -${r.stamina}`, `경험치 +${r.exp}`, `${CURRENCY.silver.name} +${fmt(r.silver)}`];
+    const flavor = EXPLORE_LINES[Math.floor(Math.random() * EXPLORE_LINES.length)];
+    setAnim((a) => ({ n: (a?.n ?? 0) + 1, line: flavor }));
+    const line = [flavor, `체력 -${r.stamina}`, `경험치 +${r.exp}`, `${CURRENCY.silver.name} +${fmt(r.silver)}`];
     setLog((l) => [line.join(' · '), ...l].slice(0, 5));
     if (r.levelUps > 0) say(`레벨 업! 속성 포인트 +${r.levelUps * POINTS_PER_LEVEL}`);
     if (r.box) setBox(r.box);
@@ -156,10 +164,10 @@ function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run:
     return !r.stopReason;
   };
 
-  const attack = async () => {
+  const explore = async () => {
     if (working) return;
     setWorking(true);
-    await battleOnce();
+    await exploreOnce();
     if (!skipRef.current) await sleep(350);
     setWorking(false);
   };
@@ -170,7 +178,7 @@ function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run:
     setAuto(true);
     setWorking(true);
     while (autoRef.current) {
-      const go = await battleOnce();
+      const go = await exploreOnce();
       if (!go) break;
       await sleep(skipRef.current ? 150 : 600);
     }
@@ -195,9 +203,14 @@ function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run:
 
       <div className="stage" style={{ background: ch.bg }}>
         <div className="stage-monster">
-          <div key={anim?.n} className={`mglyph${anim && !skip ? ' hit' : ''}`}>{qp.monster.glyph}</div>
-          {anim && !skip && <div key={`d${anim.n}`} className="float-dmg">-{fmt(anim.out.leaderAtk)}{anim.out.hits > 1 ? ` ×${anim.out.hits}` : ''}</div>}
-          <div className="small">{qp.monster.name}</div>
+          <div className="mglyph">{qp.glyph}</div>
+          <div className="small">{qp.name}</div>
+          <div key={anim?.n} className={`explore-line${anim && !skip ? ' show' : ''}`}>{anim ? anim.line : '[진행]을 눌러 탐색을 시작하세요'}</div>
+        </div>
+        <div className="trail">
+          <div className="trail-line"><i style={{ width: `${pct}%` }} /></div>
+          <div key={`w${anim?.n}`} className={`walker${anim && !skip ? ' step' : ''}`} style={{ left: `${pct}%` }}>{leader ? '🚶' : ''}</div>
+          <div className="trail-goal">🚩</div>
         </div>
         <div className="stage-leader">{leader && <CardView c={leader} stat="atk" />}</div>
       </div>
@@ -206,14 +219,14 @@ function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run:
         <div className="row between small"><span>달성도</span><span>{pct}%</span></div>
         <Bar value={pct} max={100} />
         <div className="row between small muted" style={{ marginTop: 6 }}>
-          <span>체력 {s.stamina} (전투당 {qp.stamina})</span>
+          <span>체력 {s.stamina} (탐색당 {qp.stamina})</span>
           <span>Lv {s.level}</span>
         </div>
         <div className="row" style={{ gap: 6, marginTop: 10 }}>
-          <button className="btn primary grow" disabled={working || !enough || !!box || !leader} onClick={attack}>⚔ 공격</button>
+          <button className="btn primary grow" disabled={working || !enough || !!box || !leader} onClick={explore}>▶ 진행</button>
           {auto
             ? <button className="btn grow" onClick={stopAuto}>■ 정지</button>
-            : <button className="btn grow" disabled={working || !enough || !!box || !leader} onClick={startAuto}>▶ Auto</button>}
+            : <button className="btn grow" disabled={working || !enough || !!box || !leader} onClick={startAuto}>⏩ Auto</button>}
           <label className="btn sm skip-toggle">
             <input type="checkbox" id="quest-skip" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> Skip
           </label>

@@ -42,10 +42,10 @@ describe('플레이어', () => {
 });
 
 describe('퀘스트', () => {
-  test('전투 1회: 체력 소모, 은화 300배, 달성도 상승', async (server) => {
+  test('탐색 1회: 체력 소모, 은화 300배, 달성도 상승', async (server) => {
     const s = await setup(server);
     expect(s.quest.leader).toBeTruthy();
-    const r = await server.questBattle(1, 1);
+    const r = await server.questExplore(1, 1);
     expect(r.state.stamina).toBe(s.stamina - r.result.stamina);
     expect(r.result.silver).toBe(r.result.stamina * 300);
     expect(r.result.progress).toBe(25);
@@ -53,8 +53,8 @@ describe('퀘스트', () => {
 
   test('앞 파트를 깨기 전에는 다음 파트·다음 장에 들어갈 수 없다', async (server) => {
     await setup(server);
-    expect(await fails(server.questBattle(1, 2))).toContain('열리지');
-    expect(await fails(server.questBattle(2, 1))).toContain('열리지');
+    expect(await fails(server.questExplore(1, 2))).toContain('열리지');
+    expect(await fails(server.questExplore(2, 1))).toContain('열리지');
   });
 
   test('파트 100% → 속성 포인트 +1, 재진행 가능, 3~5회마다 상자', async (server) => {
@@ -62,7 +62,7 @@ describe('퀘스트', () => {
     let r: any;
     let boxes = 0;
     for (let i = 0; i < 4; i++) {
-      r = await server.questBattle(1, 1);
+      r = await server.questExplore(1, 1);
       if (r.result.box) { boxes++; await server.questContinue(); }
     }
     expect(r.result.partClear).toBe(true);
@@ -70,7 +70,7 @@ describe('퀘스트', () => {
     expect(r.state.statPoints).toBe(1);
     expect(boxes).toBeGreaterThan(0);
     // 재진행: 달성도가 다시 0부터 오르고, 포인트는 다시 주지 않는다
-    const again = await server.questBattle(1, 1);
+    const again = await server.questExplore(1, 1);
     expect(again.result.progress).toBe(25);
     expect(again.result.firstClear).toBe(false);
   });
@@ -78,11 +78,11 @@ describe('퀘스트', () => {
   test('보상 상자를 확인하기 전에는 진행이 멈춘다', async (server) => {
     await setup(server);
     let r: any;
-    for (let i = 0; i < 5; i++) { r = await server.questBattle(1, 1); if (r.result.box) break; }
+    for (let i = 0; i < 5; i++) { r = await server.questExplore(1, 1); if (r.result.box) break; }
     expect(r.result.box).toBeTruthy();
-    expect(await fails(server.questBattle(1, 1))).toContain('상자');
+    expect(await fails(server.questExplore(1, 1))).toContain('상자');
     await server.questContinue();
-    await server.questBattle(1, 1);
+    await server.questExplore(1, 1);
   });
 
   test('모든 파트 완료 → 보스 해금, 승리 시 다음 장, 재도전 불가', async (server) => {
@@ -93,7 +93,7 @@ describe('퀘스트', () => {
       while (!done) {
         const st = (await server.getState()).state;
         if (st.stamina < 15) await server.useVitality().catch(() => server.protoSupply().then(() => server.useVitality()));
-        const r = await server.questBattle(1, part);
+        const r = await server.questExplore(1, part);
         if (r.result.box) await server.questContinue();
         done = r.result.partClear;
       }
@@ -102,7 +102,7 @@ describe('퀘스트', () => {
     expect(b.result.result.win).toBe(true);
     expect(b.state.quest.unlocked).toBe(2);
     expect(await fails(server.questBoss(1))).toContain('이미');
-    const ch2 = await server.questBattle(2, 1);
+    const ch2 = await server.questExplore(2, 1);
     expect(ch2.result.progress).toBeGreaterThan(0);
   });
 
