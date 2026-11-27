@@ -3,12 +3,11 @@ import { useMemo, useState } from 'react';
 import type { Run, Tab } from '../App';
 import type { CardsIntent } from './Cards';
 import { CardDetail } from './Cards';
-import { cardsInDecks, chapterAllCleared, deckCost, leaderCard, type PlayerState } from '../../server/src/game/player';
+import { cardsInDecks, chapterAllCleared, deckCost, leaderCard, staminaMax, type PlayerState } from '../../server/src/game/player';
 import * as C from '../../server/src/game/config';
 import { displayName, levelCap, master, rankOf, statsOf, type CardInstance } from '../../server/src/game/cards';
 import { CURRENCY, FACTIONS, type FactionId } from '../../server/src/game/data';
 import { CHAPTERS, partKey } from '../../server/src/game/questData';
-import { fxOf } from '../ui/fx';
 import { CardView, Modal, fmt } from '../ui/common';
 
 type Say = (m: string, e?: boolean) => void;
@@ -54,21 +53,14 @@ export default function Home({ s, run, busy, say, go }: { s: PlayerState; run: R
     <div>
       {/* 1. 리더 카드 + 공격 덱 */}
       <div className="panel home-hero">
-        <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
-          <div style={{ width: 112, flex: 'none' }}>
-            {leader ? <CardView c={leader} inDeck={inDeck.has(leader.uid)} onClick={() => setOpenUid(leader.uid)} /> : <button className="card empty" style={{ width: '100%' }} onClick={() => go('cards')}>리더 지정</button>}
+        <div className="row" style={{ gap: 14, alignItems: 'center' }}>
+          <div className="hero-card">
+            {leader ? <CardView c={leader} inDeck={inDeck.has(leader.uid)} onClick={() => setOpenUid(leader.uid)} /> : <button className="card empty" style={{ width: '100%', minHeight: 180 }} onClick={() => go('cards')}>리더 지정</button>}
           </div>
           <div className="grow" style={{ minWidth: 0 }}>
-            <div className="muted small">리더 카드</div>
             <div className="hero-name">{leader ? displayName(leader) : '리더 없음'}</div>
-            {leader && (
-              <>
-                <div className="small muted">{rankOf(leader)} · {FACTIONS[master(leader.cardId).faction].name} · Lv {leader.level}/{levelCap(leader)}</div>
-                <div className="hero-stats"><span>공 <b className="a">{fmt(statsOf(leader).atk)}</b></span><span>방 <b className="d">{fmt(statsOf(leader).def)}</b></span></div>
-                <div className="small" style={{ color: fxOf(leader.cardId).color }}>{fxOf(leader.cardId).glyph} {fxOf(leader.cardId).name}</div>
-              </>
-            )}
-            <div className="small muted" style={{ marginTop: 6 }}>코스트 공격 <b style={{ color: 'var(--atk)' }}>{s.atkCost}</b> · 방어 <b style={{ color: 'var(--def)' }}>{s.defCost}</b></div>
+            {leader && <div className="hero-line">{rankOf(leader)} · {FACTIONS[master(leader.cardId).faction].name}</div>}
+            {leader && <div className="hero-line">Lv {leader.level} / {levelCap(leader)}</div>}
           </div>
         </div>
         <div className="row between" style={{ marginTop: 12 }}>
@@ -81,7 +73,6 @@ export default function Home({ s, run, busy, say, go }: { s: PlayerState; run: R
       </div>
 
       {/* 4. 조건부: 할 일이 있을 때만 */}
-      {s.statPoints > 0 && <AllocateCard s={s} run={run} busy={busy} />}
       {s.staminaReserve > 0 && (
         <button className="panel alert-card" disabled={busy} onClick={async () => { const r = await run<any>('claimReserve'); if (r) say(`예비 체력 ${r.amount} 수령`); }}>
           <span>🔋 예비 체력 <b>{s.staminaReserve}</b> 수령</span><span className="muted small">체력이 가득 찬 동안 쌓인 체력</span>
@@ -92,6 +83,9 @@ export default function Home({ s, run, busy, say, go }: { s: PlayerState; run: R
           <span>⏳ {boss.name} 마감 {hoursLeft(bossLeft)} 전</span><span className="muted small">떠나기 전에 처치하세요 · 내 기여 {contrib}%</span>
         </button>
       )}
+
+      {/* 플레이어 스탯 분배 (코스트 표시 겸) */}
+      <StatCard s={s} run={run} busy={busy} />
 
       {/* 2. 오늘 할 일 */}
       <div className="panel">
@@ -135,21 +129,30 @@ function DeckThumb({ c, slot, onClick }: { c: CardInstance; slot: number; onClic
   );
 }
 
-function AllocateCard({ s, run, busy }: { s: PlayerState; run: Run; busy: boolean }) {
-  const [pa, setPa] = useState(0);
-  const [pd, setPd] = useState(0);
-  const left = s.statPoints - pa - pd;
+function StatCard({ s, run, busy }: { s: PlayerState; run: Run; busy: boolean }) {
+  const [add, setAdd] = useState({ hp: 0, atk: 0, def: 0 });
+  const used = add.hp + add.atk + add.def;
+  const left = s.statPoints - used;
+  const rows: { k: keyof typeof add; label: string; base: number; color?: string }[] = [
+    { k: 'hp', label: '체력', base: staminaMax(s) },
+    { k: 'atk', label: '공격 코스트', base: s.atkCost, color: 'var(--atk)' },
+    { k: 'def', label: '방어 코스트', base: s.defCost, color: 'var(--def)' },
+  ];
   return (
-    <div className="panel alert-card col" style={{ alignItems: 'stretch' }}>
-      <span>✨ 속성 포인트 <b>{s.statPoints}</b> 분배하기</span>
-      <p className="muted small" style={{ margin: '4px 0 8px' }}>덱 코스트 상한이 올라가요. 공격 ↑ = 레이드 1회 피해, 방어 ↑ = 교전당 공격 횟수. 남은 포인트 {left}</p>
-      <div className="row"><span className="grow">공격 코스트 {s.atkCost} <b style={{ color: 'var(--atk)' }}>+{pa}</b></span>
-        <button className="btn sm" onClick={() => setPa(Math.max(0, pa - 1))}>−</button>
-        <button className="btn sm" disabled={left <= 0} onClick={() => setPa(pa + 1)}>+</button></div>
-      <div className="row" style={{ marginTop: 6 }}><span className="grow">방어 코스트 {s.defCost} <b style={{ color: 'var(--def)' }}>+{pd}</b></span>
-        <button className="btn sm" onClick={() => setPd(Math.max(0, pd - 1))}>−</button>
-        <button className="btn sm" disabled={left <= 0} onClick={() => setPd(pd + 1)}>+</button></div>
-      <button className="btn primary block" style={{ marginTop: 8 }} disabled={busy || pa + pd === 0} onClick={async () => { await run('allocate', pa, pd); setPa(0); setPd(0); }}>분배 확정</button>
+    <div className={`panel statcard${s.statPoints > 0 ? ' has' : ''}`}>
+      <div className="row between"><b>속성 포인트</b><span>남은 포인트 <b className="pts">{left}</b></span></div>
+      {rows.map((r) => (
+        <div key={r.k} className="statrow">
+          <span className="grow">{r.label}</span>
+          <b style={{ color: r.color }}>{r.base + add[r.k]}</b>
+          <span className="plus">{add[r.k] > 0 ? `+${add[r.k]}` : ""}</span>
+          <button className="btn sm" disabled={add[r.k] <= 0} onClick={() => setAdd({ ...add, [r.k]: add[r.k] - 1 })} aria-label={`${r.label} 빼기`}>−</button>
+          <button className="btn sm" disabled={left <= 0} onClick={() => setAdd({ ...add, [r.k]: add[r.k] + 1 })} aria-label={`${r.label} 더하기`}>+</button>
+        </div>
+      ))}
+      {s.statPoints > 0 && (
+        <button className="btn primary block" style={{ marginTop: 8 }} disabled={busy || used === 0} onClick={async () => { await run('allocate', add.atk, add.def, add.hp); setAdd({ hp: 0, atk: 0, def: 0 }); }}>분배 확정</button>
+      )}
     </div>
   );
 }

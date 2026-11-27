@@ -261,7 +261,18 @@ input[type=text] { width: 100%; background: var(--bg2); border: 1px solid var(--
 .sellbar { position: sticky; bottom: 70px; margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
 
 /* 홈 */
-.hero-name { font-size: 17px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-card { width: 150px; flex: none; }
+.hero-card .card { width: 100%; }
+.hero-card .card .art { font-size: 64px; }
+.hero-card .card .nm { font-size: 13px; }
+.hero-card .card .lv, .hero-card .card .st, .hero-card .card .skill { font-size: 11.5px; }
+.hero-line { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.statcard .statrow { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; }
+.statcard .statrow b { min-width: 36px; text-align: right; }
+.statcard .plus { color: #9fe8c0; font-size: 12px; width: 26px; }
+.statcard .pts { color: var(--gold); }
+.statcard.has { border-color: #6a4a1d; background: linear-gradient(90deg, #2a2416, var(--panel)); }
+.hero-name { font-size: 18px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hero-stats { display: flex; gap: 12px; font-size: 13px; margin: 4px 0; }
 .hero-stats b.a { color: var(--atk); } .hero-stats b.d { color: var(--def); }
 .dthumbs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }

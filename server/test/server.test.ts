@@ -79,7 +79,11 @@ describe('퀘스트', () => {
     expect(await fails(server.questBoss(1))).toContain('100%');
     for (let part = 1; part <= 5; part++) {
       let done = false;
-      while (!done) done = (await server.questStep(1, part)).result.partClear;
+      while (!done) {
+        const st = (await server.getState()).state;
+        if (st.stamina < 1) { if (st.vitality <= 0) await server.protoSupply(); await server.useVitality(); }
+        done = (await server.questStep(1, part)).result.partClear;
+      }
     }
     const b = await server.questBoss(1);
     expect(b.result.result.win).toBe(true);
@@ -99,6 +103,22 @@ describe('퀘스트', () => {
     expect(r.result.silver).toBeGreaterThan(0);
     expect(r.state.silver).toBe(s.silver + r.result.silver);
     expect(r.state.cards.length).toBe(s.cards.length - 1);
+  });
+
+  test('체력 상한 35에서 시작, 속성 포인트로 체력·공격·방어 분배', async (server) => {
+    const s = await setup(server);
+    expect(s.maxStamina).toBe(35);
+    expect(s.stamina).toBe(35);
+    let r: any;
+    do { r = await server.questStep(1, 1); } while (!r.result.partClear);
+    const st = (await server.getState()).state;
+    expect(st.statPoints).toBeGreaterThan(2);
+    const a = await server.allocate(1, 1, 1);
+    expect(a.state.maxStamina).toBe(36);
+    expect(a.state.atkCost).toBe(st.atkCost + 1);
+    expect(a.state.defCost).toBe(st.defCost + 1);
+    expect(a.state.statPoints).toBe(st.statPoints - 3);
+    expect(await fails(server.allocate(0, 0, 999))).toContain('부족');
   });
 
   test('은화 뽑기: 1회 1,000 / 10회 9,000, 카드 지급', async (server) => {

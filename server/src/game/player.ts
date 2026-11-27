@@ -21,6 +21,8 @@ export interface PlayerState {
   atkCost: number;
   defCost: number;
   stamina: number;
+  /** 체력 상한 (속성 포인트로 올림) */
+  maxStamina: number;
   staminaAt: number;
   staminaReserve: number;
   tickets: number;
@@ -85,7 +87,8 @@ export const tierOf = (score: number) => {
   C.TIERS.forEach((x, i) => { if (score >= x.min) t = i; });
   return t;
 };
-export const staminaMax = (s: PlayerState) => C.STAMINA_BASE_MAX + C.STAMINA_PER_LEVEL * (s.level - 1);
+export const staminaMax = (s: PlayerState) => s.maxStamina;
+export const reserveMax = (s: PlayerState) => s.maxStamina * C.STAMINA_RESERVE_MULT;
 
 function grantCard(s: PlayerState, cardId: string, now: number, form = 1, level = 1): CardInstance | null {
   if (s.cards.length >= C.INVENTORY_CAP) return null;
@@ -103,7 +106,7 @@ export function createPlayer(name: string, faction: FactionId, ctx: Ctx): Player
   const s: PlayerState = {
     v: 1, name: (name || '모험가').slice(0, 12), faction, level: 1, exp: 0, statPoints: 0,
     atkCost: C.START_COST, defCost: C.START_COST,
-    stamina: C.STAMINA_BASE_MAX, staminaAt: ctx.now, staminaReserve: 0,
+    stamina: C.STAMINA_START_MAX, maxStamina: C.STAMINA_START_MAX, staminaAt: ctx.now, staminaReserve: 0,
     tickets: C.TICKET_CAP, ticketAt: ctx.now,
     silver: 30_000, stardust: 1, vitality: 1, shards: { HR: 0, SR: 0, SSR: 0 },
     cards: [], seq: 0,
@@ -139,6 +142,8 @@ export function tick(s: PlayerState, ctx: Ctx): void {
   const now = ctx.now;
   if (!s.quest || (s.quest as any).v !== 3) { s.quest = initQuest(); s.quest.leader = s.presets[0]?.atk[2] ?? s.cards[0]?.uid ?? null; }
   if (!s.quest.found) s.quest.found = {};
+  // 체력 상한을 속성 포인트로 올리는 방식으로 바뀌기 전 데이터
+  if (typeof s.maxStamina !== 'number') { s.maxStamina = C.STAMINA_START_MAX; s.stamina = Math.min(s.stamina, s.maxStamina); s.staminaReserve = Math.min(s.staminaReserve, reserveMax(s)); }
   if (s.quest.leader && !s.cards.some((c) => c.uid === s.quest.leader)) s.quest.leader = null;
   // 체력: 1분당 1, 상한 초과분은 예비 풀로
   const gained = Math.floor((now - s.staminaAt) / C.STAMINA_REGEN_MS);
@@ -148,7 +153,7 @@ export function tick(s: PlayerState, ctx: Ctx): void {
     const room = Math.max(0, max - s.stamina);
     const toMain = Math.min(room, gained);
     s.stamina += toMain;
-    s.staminaReserve = Math.min(C.STAMINA_RESERVE_MAX, s.staminaReserve + (gained - toMain));
+    s.staminaReserve = Math.min(reserveMax(s), s.staminaReserve + (gained - toMain));
   }
   // 보스 입장권: 3시간당 1, 상한 10 (별가루로 초과 보유한 분은 유지)
   if (s.tickets >= C.TICKET_CAP) s.ticketAt = now;
@@ -264,14 +269,18 @@ export function selectPreset(s: PlayerState, idx: number) {
   s.activePreset = idx;
 }
 
-export function allocate(s: PlayerState, atk: number, def: number) {
-  atk = Math.max(0, Math.floor(atk || 0));
-  def = Math.max(0, Math.floor(def || 0));
-  if (atk + def === 0) throw new Error('분배할 포인트를 입력하세요.');
-  if (atk + def > s.statPoints) throw new Error('포인트가 부족합니다.');
-  s.statPoints -= atk + def;
+/** 속성 포인트 분배: 체력 상한 / 공격 코스트 / 방어 코스트 (1포인트 = +1) */
+export function allocate(s: PlayerState, atk: number, def: number, hp = 0) {
+  const n = (x: number) => Math.max(0, Math.floor(Number(x) || 0));
+  atk = n(atk); def = n(def); hp = n(hp);
+  const total = atk + def + hp;
+  if (total === 0) throw new Error('분배할 포인트를 입력하세요.');
+  if (total > s.statPoints) throw new Error('포인트가 부족합니다.');
+  s.statPoints -= total;
   s.atkCost += atk;
   s.defCost += def;
+  s.maxStamina += hp;
+  s.stamina += hp;
 }
 
 export function setFaction(s: PlayerState, f: FactionId) {

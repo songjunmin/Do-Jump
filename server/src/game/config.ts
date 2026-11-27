@@ -41,10 +41,11 @@ export const enhanceCost = (level: number, materials: number) => materials * (50
 export const evolveCost = (rankIdx: number, form: number) => 1000 * (rankIdx + 1) * form;
 
 /** 플레이어 자원 (§4) */
-export const STAMINA_BASE_MAX = 150;
-export const STAMINA_PER_LEVEL = 2;
+/** 체력 상한 시작값. 이후 속성 포인트 1 = 체력 상한 +1 */
+export const STAMINA_START_MAX = 35;
 export const STAMINA_REGEN_MS = 60_000;
-export const STAMINA_RESERVE_MAX = 450;
+/** 예비 체력 풀 상한 = 체력 상한 × 3 */
+export const STAMINA_RESERVE_MULT = 3;
 export const TICKET_REGEN_MS = 3 * 60 * 60_000;
 export const TICKET_CAP = 10;
 export const TICKET_HARD_CAP = 20;

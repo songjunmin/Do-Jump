@@ -92,10 +92,10 @@ export class Server {
     return view(s, c);
   }
 
-  async allocate(atk: number, def: number) {
+  async allocate(atk: number, def: number, hp = 0) {
     const c = ctx();
     const s = await loadOrThrow(c);
-    P.allocate(s, atk, def);
+    P.allocate(s, atk, def, hp);
     await save(s);
     return view(s, c);
   }
