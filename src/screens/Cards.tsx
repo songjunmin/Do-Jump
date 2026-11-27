@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { Run } from '../App';
-import { cardsInDecks, sellPrice, type PlayerState } from '../../server/src/game/player';
+import { cardsInDecks, inventoryCap, sellPrice, type PlayerState } from '../../server/src/game/player';
 import * as C from '../../server/src/game/config';
 import { canEvolve, displayName, evoFormula, isMaxed, levelCap, master, rankOf, skillOf, statsOf, type CardInstance } from '../../server/src/game/cards';
 import { FACTIONS, CURRENCY, type FactionId } from '../../server/src/game/data';
@@ -51,7 +51,7 @@ export default function Cards({ s, run, busy, say, intent, clearIntent }: { s: P
 
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>보유카드 리스트 <span className="muted small">({s.cards.length}/{C.INVENTORY_CAP})</span></h2>
+      <h2 style={{ marginTop: 0 }}>보유카드 리스트 <span className="muted small">({s.cards.length}/{inventoryCap(s)})</span></h2>
       {!pick && <div className="seg" style={{ marginBottom: 8 }}>
         <button className={tab === 'list' ? 'on' : ''} onClick={() => { setTab('list'); setPicked([]); }}>리스트</button>
         <button className={tab === 'sell' ? 'on' : ''} onClick={() => setTab('sell')}>판매</button>

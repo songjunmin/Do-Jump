@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { call, OFFLINE } from './api';
 import type { PlayerState } from '../server/src/game/player';
 import { staminaMax } from '../server/src/game/player';
@@ -9,18 +9,20 @@ import Home from './screens/Home';
 import Cards, { type CardsIntent } from './screens/Cards';
 import Deck from './screens/Deck';
 import Duel from './screens/Duel';
-import Raid from './screens/Raid';
+import Raid, { type BossKind, type WeeklyInfo } from './screens/Raid';
+import Shop from './screens/Shop';
 import Quest from './screens/Quest';
 
 export type Run = <R = any>(fn: string, ...args: any[]) => Promise<R | undefined>;
-export type Tab = 'home' | 'quest' | 'cards' | 'deck' | 'duel' | 'raid';
-const TABS: { id: Tab; label: string; ic: string }[] = [
+export type Tab = 'home' | 'quest' | 'cards' | 'deck' | 'duel' | 'shop' | 'boss';
+export type Go = (t: Tab, intent?: CardsIntent, boss?: BossKind) => void;
+const TABS: { id: Exclude<Tab, 'boss'>; label: string; ic: string }[] = [
   { id: 'home', label: '홈', ic: '🏠' },
   { id: 'quest', label: '퀘스트', ic: '🗺' },
   { id: 'cards', label: '카드', ic: '🃏' },
   { id: 'deck', label: '덱', ic: '🗂' },
   { id: 'duel', label: '결투장', ic: '⚔' },
-  { id: 'raid', label: '레이드', ic: '🐉' },
+  { id: 'shop', label: '상점', ic: '🛒' },
 ];
 
 export default function App() {
@@ -30,7 +32,17 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('home');
   const [busy, setBusy] = useState(false);
   const [cardsIntent, setCardsIntent] = useState<CardsIntent>(null);
-  const go = useCallback((t: Tab, intent: CardsIntent = null) => { setCardsIntent(intent); setTab(t); window.scrollTo(0, 0); }, []);
+  const tabRef = useRef<Tab>('home');
+  const [bossKind, setBossKind] = useState<BossKind>('personal');
+  const [backTab, setBackTab] = useState<Tab>('home');
+  const [weekly, setWeekly] = useState<WeeklyInfo | null>(null);
+  const go: Go = useCallback((t, intent = null, boss) => {
+    setCardsIntent(intent);
+    if (t === 'boss') { setBossKind(boss ?? 'personal'); setBackTab(tabRef.current === 'boss' ? 'home' : tabRef.current); }
+    tabRef.current = t;
+    setTab(t);
+    window.scrollTo(0, 0);
+  }, []);
   const [toast, setToast] = useState<{ msg: string; err?: boolean } | null>(null);
 
   const say = useCallback((msg: string, err = false) => {
@@ -103,12 +115,13 @@ export default function App() {
             <button className="btn sm" style={{ marginTop: 6 }} onClick={() => run('dismissNotices')}>확인</button>
           </div>
         )}
-        {tab === 'home' && <Home s={s} run={run} busy={busy} say={say} go={go} />}
-        {tab === 'quest' && <Quest s={s} run={run} busy={busy} say={say} />}
+        {tab === 'home' && <Home s={s} run={run} busy={busy} say={say} go={go} weekly={weekly} setWeekly={setWeekly} />}
+        {tab === 'quest' && <Quest s={s} run={run} busy={busy} say={say} go={go} />}
         {tab === 'cards' && <Cards key={cardsIntent?.pick ?? 'list'} s={s} run={run} busy={busy} say={say} intent={cardsIntent} clearIntent={() => setCardsIntent(null)} />}
         {tab === 'deck' && <Deck s={s} run={run} busy={busy} />}
         {tab === 'duel' && <Duel s={s} run={run} busy={busy} />}
-        {tab === 'raid' && <Raid s={s} run={run} busy={busy} />}
+        {tab === 'shop' && <Shop s={s} run={run} busy={busy} say={say} />}
+        {tab === 'boss' && <Raid key={bossKind} s={s} run={run} busy={busy} kind={bossKind} weekly={weekly} setWeekly={setWeekly} onBack={() => go(backTab)} />}
       </main>
       <nav className="tabs">
         {TABS.map((t) => (

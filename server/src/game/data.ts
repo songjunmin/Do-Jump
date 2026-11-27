@@ -89,6 +89,12 @@ export const BOSSES: BossType[] = [
   { id: 'knight', name: '망령 기사왕', kind: '균형형', hp: 220_000, power: 2_000, glyph: '👑' },
 ];
 
+/** 주간 공유 보스: 모든 플레이어가 함께 HP를 깎는다. 주마다 순환 */
+export const WEEKLY_BOSSES: BossType[] = [
+  { id: 'w_abyss', name: '심연의 거룡', kind: '공유 보스', hp: 3_000_000, power: 2_600, glyph: '🐲' },
+  { id: 'w_titan', name: '폭풍의 거신', kind: '공유 보스', hp: 3_600_000, power: 2_200, glyph: '🌩' },
+];
+
 /** 결투장 설계 봇: 티어별 기준 방어 덱. [cardId, form, level] */
 export interface BotDef { id: string; name: string; tier: number; faction: FactionId; deck: [string, number, number][] }
 export const BOTS: BotDef[] = [

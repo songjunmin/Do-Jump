@@ -133,12 +133,60 @@ describe('퀘스트', () => {
     expect(await fails(server.gacha(3))).toContain('1회 또는 10회');
   });
 
+  test('뽑기 천장 100회: HR 확정, 픽업 뽑기', async (server) => {
+    await setup(server);
+    for (let i = 0; i < 3; i++) await server.protoSupply();
+    let st: any;
+    let sawHr = false;
+    for (let i = 0; i < 10; i++) {
+      const r = await server.gacha(10, 'pickup');
+      st = r.state;
+      if (r.result.pityHit) sawHr = true;
+      for (const u of r.result.cards) if (st.cards.find((c: any) => c.uid === u).cardId.startsWith('hr_')) sawHr = true;
+      if (st.cards.length > 180) await server.sellCards(st.cards.filter((c: any) => c.cardId.startsWith('n_') && !st.presets.some((p: any) => [...p.atk, ...p.def].includes(c.uid))).slice(0, 60).map((c: any) => c.uid));
+    }
+    expect(sawHr).toBe(true);
+    expect(st.gacha.pity).toBeLessThan(100);
+    expect(st.gacha.total).toBe(100);
+  });
+
+  test('상점: 스탯 리셋 · 인벤토리 확장 · 진형 변경', async (server) => {
+    await setup(server);
+    let r: any;
+    do { r = await server.questStep(1, 1); } while (!r.result.partClear);
+    const before = (await server.getState()).state;
+    await server.allocate(1, 1, 1);
+    const reset = await server.buyShop('statReset');
+    expect(reset.state.statPoints).toBe(before.statPoints);
+    expect(reset.state.maxStamina).toBe(35);
+    const inv = await server.buyShop('inventory');
+    expect(inv.state.invCap).toBe(220);
+    const fac = await server.buyShop('faction');
+    expect(fac.state.faction).toBe('dusk');
+  });
+
   test('리더 카드는 강화 재료로 쓸 수 없다', async (server) => {
     const s = await setup(server);
     const n = s.cards.find((c: any) => c.cardId === 'n_spear');
     await server.setLeader(n.uid);
     const [target] = spare(s, 'r_lancer');
     expect(await fails(server.enhance(target.uid, [n.uid]))).toContain('리더');
+  });
+});
+
+describe('주간 공유 보스', () => {
+  test('두 플레이어의 피해가 같은 보스 HP에 합산된다', async (server) => {
+    await setup(server, 'alice');
+    const a = await server.weeklyEngage();
+    expect(a.result.result.dealt).toBeGreaterThan(0);
+    expect(a.state.tickets).toBe(9);
+    const hpA = a.result.boss.hp;
+    expect(hpA).toBe(a.result.boss.maxHp - a.result.result.dealt);
+    await setup(server, 'bob', 'dusk');
+    const b = await server.weeklyEngage();
+    expect(b.result.boss.hp).toBe(hpA - b.result.result.dealt);
+    expect(b.result.boss.myDealt).toBe(b.result.result.dealt);
+    expect(await fails(server.weeklyClaim())).toContain('쓰러진');
   });
 });
 

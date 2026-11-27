@@ -1,22 +1,19 @@
 // 홈: 내 전력(리더 + 공격 덱) · 오늘 할 일 · 바로가기 · 할 일이 있을 때만 뜨는 카드
-import { useMemo, useState } from 'react';
-import type { Run, Tab } from '../App';
-import type { CardsIntent } from './Cards';
+import { useEffect, useMemo, useState } from 'react';
+import type { Go, Run } from '../App';
 import { CardDetail } from './Cards';
 import { cardsInDecks, chapterAllCleared, deckCost, leaderCard, staminaMax, type PlayerState } from '../../server/src/game/player';
 import * as C from '../../server/src/game/config';
-import { displayName, levelCap, master, rankOf, statsOf, type CardInstance } from '../../server/src/game/cards';
+import { displayName, isMaxed, levelCap, master, rankOf, statsOf, type CardInstance } from '../../server/src/game/cards';
 import { CURRENCY, FACTIONS, type FactionId } from '../../server/src/game/data';
 import { CHAPTERS, partKey } from '../../server/src/game/questData';
-import { CardView, Modal, fmt } from '../ui/common';
+import { ArtLayers, Bar, CardArt, fmt } from '../ui/common';
+import { hoursLeft, pct, type WeeklyInfo } from './Raid';
+import { skillOf } from '../../server/src/game/cards';
+import { MAX_FORM } from '../../server/src/game/config';
 
 type Say = (m: string, e?: boolean) => void;
-type Go = (t: Tab, intent?: CardsIntent) => void;
 
-const hoursLeft = (ms: number) => {
-  const h = Math.max(0, ms) / 3_600_000;
-  return h >= 1 ? `${Math.floor(h)}시간 ${Math.floor((h % 1) * 60)}분` : `${Math.ceil(h * 60)}분`;
-};
 
 /** 퀘스트 현재 위치 한 줄 */
 function questNow(s: PlayerState): string {
@@ -30,46 +27,83 @@ function questNow(s: PlayerState): string {
   return '모든 장 클리어';
 }
 
-export default function Home({ s, run, busy, say, go }: { s: PlayerState; run: Run; busy: boolean; say: Say; go: Go }) {
+export default function Home({ s, run, busy, say, go, weekly, setWeekly }: {
+  s: PlayerState; run: Run; busy: boolean; say: Say; go: Go; weekly: WeeklyInfo | null; setWeekly: (w: WeeklyInfo) => void;
+}) {
   const [openUid, setOpenUid] = useState<string | null>(null);
-  const [gacha, setGacha] = useState(false);
+  const [detailMode, setDetailMode] = useState<'info' | 'enhance'>('info');
   const inDeck = useMemo(() => cardsInDecks(s), [s]);
   const leader = leaderCard(s);
   const preset = s.presets[s.activePreset];
   const deck = preset.atk.map((id) => (id ? s.cards.find((c) => c.uid === id) ?? null : null));
   const open = s.cards.find((c) => c.uid === openUid) || null;
   const boss = s.raid.boss;
-  const contrib = boss ? Math.round((boss.dealtByMe / boss.maxHp) * 100) : 0;
   const bossLeft = boss ? boss.expiresAt - Date.now() : Infinity;
+  useEffect(() => { run<WeeklyInfo>('weeklyBoss').then((w) => w && setWeekly(w)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const evolved = useEvolveReveal(leader);
 
-  const todos: { label: string; value: string; tab: Tab; done?: boolean }[] = [
-    { label: '결투장', value: `${s.duel.used} / ${C.DUEL_DAILY_ATTEMPTS} 시도`, tab: 'duel', done: s.duel.used >= C.DUEL_DAILY_ATTEMPTS },
-    { label: '보스 입장권', value: `${s.tickets} / ${C.TICKET_CAP}`, tab: 'raid', done: s.tickets <= 0 },
-    { label: '레이드 보스', value: boss ? `${boss.glyph} 내 기여 ${contrib}%` : '대기 중', tab: 'raid' },
-    { label: '퀘스트', value: questNow(s), tab: 'quest' },
+  const todos: { label: string; value: string; on: () => void; done?: boolean }[] = [
+    { label: '결투장', value: `${s.duel.used} / ${C.DUEL_DAILY_ATTEMPTS} 시도`, on: () => go('duel'), done: s.duel.used >= C.DUEL_DAILY_ATTEMPTS },
+    { label: '주간 보스', value: weekly ? (weekly.hp <= 0 ? (weekly.claimed || weekly.myDealt <= 0 ? '격파 완료' : '격파! 보상 받기') : `내 기여 ${pct(weekly.contribution)}`) : '…', on: () => go('boss', null, 'weekly'), done: !!weekly && weekly.hp <= 0 && (weekly.claimed || weekly.myDealt <= 0) },
+    { label: '퀘스트', value: questNow(s), on: () => go('quest') },
   ];
 
   return (
     <div>
-      {/* 1. 리더 카드 + 공격 덱 */}
+      {/* 1. 리더 카드 (히어로) + 공격 덱 */}
       <div className="panel home-hero">
-        <div className="row" style={{ gap: 14, alignItems: 'center' }}>
-          <div className="hero-card">
-            {leader ? <CardView c={leader} inDeck={inDeck.has(leader.uid)} onClick={() => setOpenUid(leader.uid)} /> : <button className="card empty" style={{ width: '100%', minHeight: 180 }} onClick={() => go('cards')}>리더 지정</button>}
+        {leader ? <HeroCard c={leader} evolved={evolved} onClick={() => { setDetailMode('info'); setOpenUid(leader.uid); }} />
+          : <button className="card empty hero-empty" onClick={() => go('cards')}>리더 카드를 지정하세요</button>}
+        {leader && (
+          <div className="hero-evo">
+            <span className="small muted">진화</span>
+            <span className="dots">{Array.from({ length: MAX_FORM }, (_, i) => <i key={i} className={i < leader.form ? 'on' : ''} />)}</span>
+            {leader.form < MAX_FORM
+              ? <span className="next"><span className="small muted">다음 모습</span><span className="next-art"><CardArt cardId={leader.cardId} form={leader.form + 1} silhouette /></span></span>
+              : <span className="small" style={{ color: 'var(--gold)' }}>최종 진화</span>}
           </div>
-          <div className="grow" style={{ minWidth: 0 }}>
-            <div className="hero-name">{leader ? displayName(leader) : '리더 없음'}</div>
-            {leader && <div className="hero-line">{rankOf(leader)} · {FACTIONS[master(leader.cardId).faction].name}</div>}
-            {leader && <div className="hero-line">Lv {leader.level} / {levelCap(leader)}</div>}
-          </div>
+        )}
+        <div className="row" style={{ gap: 6, marginTop: 10 }}>
+          <button className="btn grow" onClick={() => go('cards')}>리더 변경</button>
+          <button className="btn primary grow" disabled={!leader || isMaxed(leader)} onClick={() => { if (leader) { setDetailMode('enhance'); setOpenUid(leader.uid); } }}>강화하기</button>
         </div>
-        <div className="row between" style={{ marginTop: 12 }}>
+        <div className="row between" style={{ marginTop: 14 }}>
           <span className="small"><b>공격 덱</b> <span className="muted">{preset.name} · 코스트 {deckCost(s, preset.atk)}/{s.atkCost}</span></span>
           <button className="btn sm" onClick={() => go('deck')}>덱 편집</button>
         </div>
         <div className="dthumbs">
-          {deck.map((c, i) => c ? <DeckThumb key={i} c={c} slot={i + 1} onClick={() => setOpenUid(c.uid)} /> : <button key={i} className="dthumb empty" onClick={() => go('deck')}><span className="slot">{i + 1}</span>+</button>)}
+          {deck.map((c, i) => c ? <DeckThumb key={i} c={c} slot={i + 1} onClick={() => { setDetailMode('info'); setOpenUid(c.uid); }} /> : <button key={i} className="dthumb empty" onClick={() => go('deck')}><span className="slot">{i + 1}</span>+</button>)}
         </div>
+      </div>
+
+      {/* 보스 현황 (상시): 입장권 · 개인 보스 · 주간 보스 */}
+      <div className="panel bosspanel">
+        <div className="row between">
+          <span>🎟 보스 입장권 <b className="tk">{s.tickets}</b> / {C.TICKET_CAP}</span>
+          {s.stardust > 0 && s.tickets + C.STARDUST_TICKETS <= C.TICKET_HARD_CAP
+            ? <button className="btn sm" disabled={busy} onClick={() => run('useStardust')}>{CURRENCY.stardust.name} 사용 +{C.STARDUST_TICKETS}</button>
+            : <button className="btn sm" onClick={() => go('shop')}>충전</button>}
+        </div>
+        {weekly && (
+          <button className="bossrow" onClick={() => go('boss', null, 'weekly')}>
+            <span className="bg">{weekly.glyph}</span>
+            <span className="grow">
+              <span className="row between small"><b>주간 · {weekly.name}</b><span className="muted">{weekly.hp <= 0 ? '격파됨' : hoursLeft(weekly.endsAt - Date.now())}</span></span>
+              <Bar value={weekly.hp} max={weekly.maxHp} kind="hp" />
+              <span className="small muted">HP {fmt(weekly.hp)} / {fmt(weekly.maxHp)} · 내 기여 {pct(weekly.contribution)}</span>
+            </span>
+          </button>
+        )}
+        {boss && (
+          <button className="bossrow" onClick={() => go('boss', null, 'personal')}>
+            <span className="bg">{boss.glyph}</span>
+            <span className="grow">
+              <span className="row between small"><b>개인 · {boss.name}</b><span className="muted">{hoursLeft(bossLeft)}</span></span>
+              <Bar value={boss.hp} max={boss.maxHp} kind="hp" />
+              <span className="small muted">HP {fmt(boss.hp)} / {fmt(boss.maxHp)}</span>
+            </span>
+          </button>
+        )}
       </div>
 
       {/* 4. 조건부: 할 일이 있을 때만 */}
@@ -79,8 +113,8 @@ export default function Home({ s, run, busy, say, go }: { s: PlayerState; run: R
         </button>
       )}
       {boss && bossLeft < 24 * 3_600_000 && (
-        <button className="panel alert-card warn" onClick={() => go('raid')}>
-          <span>⏳ {boss.name} 마감 {hoursLeft(bossLeft)} 전</span><span className="muted small">떠나기 전에 처치하세요 · 내 기여 {contrib}%</span>
+        <button className="panel alert-card warn" onClick={() => go('boss', null, 'personal')}>
+          <span>⏳ {boss.name} 마감 {hoursLeft(bossLeft)} 전</span><span className="muted small">떠나기 전에 처치하세요</span>
         </button>
       )}
 
@@ -92,7 +126,7 @@ export default function Home({ s, run, busy, say, go }: { s: PlayerState; run: R
         <h2 style={{ marginTop: 0 }}>오늘 할 일</h2>
         <div className="todos">
           {todos.map((t) => (
-            <button key={t.label} className={`todo${t.done ? ' done' : ''}`} onClick={() => go(t.tab)}>
+            <button key={t.label} className={`todo${t.done ? ' done' : ''}`} onClick={t.on}>
               <span>{t.label}</span><b>{t.value}</b><span className="chev">›</span>
             </button>
           ))}
@@ -104,13 +138,12 @@ export default function Home({ s, run, busy, say, go }: { s: PlayerState; run: R
         <button onClick={() => go('quest')}><span className="ic">🗺</span>퀘스트<small>{questNow(s)}</small></button>
         <button onClick={() => go('cards', { pick: 'enhance' })}><span className="ic">⚒</span>강화<small>카드 레벨 올리기</small></button>
         <button onClick={() => go('cards', { pick: 'evolve' })}><span className="ic">✦</span>진화<small>같은 카드 2장 합치기</small></button>
-        <button onClick={() => setGacha(true)}><span className="ic">🎴</span>뽑기<small>{CURRENCY.silver.name} {fmt(C.GACHA_COST)} / 회</small></button>
+        <button onClick={() => go('shop')}><span className="ic">🎴</span>뽑기<small>천장 {s.gacha?.pity ?? 0} / {C.GACHA_PITY}</small></button>
       </div>
 
       {C.PROTOTYPE_MODE && <ProtoTools s={s} run={run} busy={busy} say={say} />}
 
-      {open && <CardDetail key={open.uid} c={open} s={s} run={run} busy={busy} say={say} inDeck={inDeck} onClose={() => setOpenUid(null)} />}
-      {gacha && <Gacha s={s} run={run} busy={busy} onClose={() => setGacha(false)} />}
+      {open && <CardDetail key={open.uid + detailMode} c={open} s={s} run={run} busy={busy} say={say} inDeck={inDeck} initialMode={detailMode} onClose={() => setOpenUid(null)} />}
     </div>
   );
 }
@@ -157,20 +190,48 @@ function StatCard({ s, run, busy }: { s: PlayerState; run: Run; busy: boolean })
   );
 }
 
-function Gacha({ s, run, busy, onClose }: { s: PlayerState; run: Run; busy: boolean; onClose: () => void }) {
-  const [got, setGot] = useState<string[]>([]);
-  const cards = got.map((u) => s.cards.find((c) => c.uid === u)).filter(Boolean) as CardInstance[];
-  const draw = async (n: number) => { const r = await run<any>('gacha', n); if (r) setGot(r.cards); };
+/** 리더 카드 히어로: 큰 아트 + 하단 오버레이 두 줄. 공·방·스킬은 프레임에 */
+function HeroCard({ c, evolved, onClick }: { c: CardInstance; evolved: boolean; onClick: () => void }) {
+  const m = master(c.cardId);
+  const rank = rankOf(c);
+  const st = statsOf(c);
+  const sk = skillOf(c.cardId);
+  const fc = FACTIONS[m.faction].color;
   return (
-    <Modal title="뽑기" onClose={onClose}>
-      <p className="muted small" style={{ marginTop: 0 }}>{CURRENCY.silver.name}로 카드를 뽑아요. 확률 {C.GACHA_RATES.map((x) => `${x.rank} ${Math.round(x.p * 100)}%`).join(' · ')}. 보유 {s.cards.length}/{C.INVENTORY_CAP}</p>
-      <div className="row" style={{ gap: 6 }}>
-        <button className="btn grow" disabled={busy || s.silver < C.gachaCost(1)} onClick={() => draw(1)}>1회 · {fmt(C.gachaCost(1))}</button>
-        <button className="btn primary grow" disabled={busy || s.silver < C.gachaCost(10)} onClick={() => draw(10)}>10회 · {fmt(C.gachaCost(10))}</button>
+    <button className={`hero${evolved ? ' evolved' : ''}`} style={{ ['--rc' as any]: `var(--r-${rank})`, ['--fc' as any]: fc }} onClick={onClick}>
+      <div className={`hero-art art f${c.form}`} style={{ background: `linear-gradient(165deg, ${fc}77, #15161f 78%)` }}>
+        <ArtLayers form={c.form} />
+        <span className="hero-glyph">{m.glyph}</span>
+        <span className="hb rk">{rank}</span>
+        <span className="hb cost">{m.cost}</span>
+        <span className="hb stats"><b className="a">공 {fmt(st.atk)}</b><b className="d">방 {fmt(st.def)}</b></span>
+        <span className="hb skill">{sk ? sk.name : m.style === 'def' ? '깡방' : '깡공'}</span>
+        <span className="hero-overlay">
+          <b>{displayName(c)}</b>
+          <span>{rank} · {FACTIONS[m.faction].name} · Lv {c.level}/{levelCap(c)}</span>
+        </span>
+        {evolved && <span className="evo-banner">진화! 새로운 모습</span>}
       </div>
-      {cards.length > 0 && <div className="cardgrid" style={{ marginTop: 12 }}>{cards.map((c) => <CardView key={c.uid} c={c} />)}</div>}
-    </Modal>
+    </button>
   );
+}
+
+/** 리더의 진화 단계가 지난번 홈에서 본 것보다 올라갔으면 한 번만 연출 */
+function useEvolveReveal(leader: CardInstance | null): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (!leader) return;
+    let seen: { uid: string; form: number } | null = null;
+    try { seen = JSON.parse(localStorage.getItem('tcg-leader-seen') || 'null'); } catch { /* 무시 */ }
+    if (seen && seen.uid === leader.uid && leader.form > seen.form) {
+      setOn(true);
+      const t = window.setTimeout(() => setOn(false), 2600);
+      try { localStorage.setItem('tcg-leader-seen', JSON.stringify({ uid: leader.uid, form: leader.form })); } catch { /* 무시 */ }
+      return () => window.clearTimeout(t);
+    }
+    try { localStorage.setItem('tcg-leader-seen', JSON.stringify({ uid: leader.uid, form: leader.form })); } catch { /* 무시 */ }
+  }, [leader?.uid, leader?.form]); // eslint-disable-line react-hooks/exhaustive-deps
+  return on;
 }
 
 function ProtoTools({ s, run, busy, say }: { s: PlayerState; run: Run; busy: boolean; say: Say }) {

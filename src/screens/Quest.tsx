@@ -1,26 +1,62 @@
 // 퀘스트: [목록] → [진행: Enter 1회 = 1스텝, 고정 레이아웃에서 장면 그림만 바뀜] → [보스 배틀].
 // 계산은 모두 서버, 여기서는 연출만.
 import { useEffect, useRef, useState } from 'react';
-import type { Run } from '../App';
-import { canEnterPart, chapterAllCleared, leaderCard, sellPrice, staminaMax, type AdventureStep, type PlayerState } from '../../server/src/game/player';
+import type { Go, Run } from '../App';
+import { hoursLeft } from './Raid';
+import { canEnterPart, chapterAllCleared, inventoryCap, leaderCard, sellPrice, staminaMax, type AdventureStep, type PlayerState } from '../../server/src/game/player';
 import { CHAPTERS, partKey, stepExp, stepSilver, stepsToClear, type Chapter } from '../../server/src/game/questData';
 import { fxOf } from '../ui/fx';
-import { INVENTORY_CAP, LEADER_HP_MULT, POINTS_PER_LEVEL, playerExpToNext } from '../../server/src/game/config';
+import { LEADER_HP_MULT, TICKET_CAP, POINTS_PER_LEVEL, playerExpToNext } from '../../server/src/game/config';
 import { displayName, master, rankOf, statsOf, toBattleCard } from '../../server/src/game/cards';
 import { CARD_MAP, CURRENCY, FACTIONS } from '../../server/src/game/data';
 import type { LeaderBattleResult } from '../../server/src/game/engine';
 import { Bar, CardView, MiniCard, Modal, fmt } from '../ui/common';
 
 type Say = (m: string, e?: boolean) => void;
-type View = { kind: 'list' } | { kind: 'run'; chapter: number; part: number };
+type View = { kind: 'list' } | { kind: 'bosses' } | { kind: 'run'; chapter: number; part: number };
 
-export default function Quest({ s, run, busy, say }: { s: PlayerState; run: Run; busy: boolean; say: Say }) {
+export default function Quest({ s, run, busy, say, go }: { s: PlayerState; run: Run; busy: boolean; say: Say; go: Go }) {
   const [view, setView] = useState<View>({ kind: 'list' });
   const [chapterId, setChapterId] = useState(() => Math.min(s.quest.unlocked, CHAPTERS.length));
+  if (view.kind === 'bosses') return <BossList s={s} go={go} onBack={() => setView({ kind: 'list' })} />;
   if (view.kind === 'run') {
     return <QuestRun s={s} run={run} say={say} chapter={view.chapter} part={view.part} onExit={() => setView({ kind: 'list' })} />;
   }
-  return <QuestList s={s} run={run} busy={busy} chapterId={chapterId} setChapterId={setChapterId} onEnter={(c, p) => setView({ kind: 'run', chapter: c, part: p })} />;
+  const bosses = s.raid.boss ? 1 : 0;
+  return (
+    <>
+      <button className="bossbanner" onClick={() => setView({ kind: 'bosses' })}>
+        <span>⚔ 교전 중인 보스 <b>{bosses}</b>마리</span>
+        <span className="small">입장권 {s.tickets}/{TICKET_CAP} ›</span>
+      </button>
+      <QuestList s={s} run={run} busy={busy} chapterId={chapterId} setChapterId={setChapterId} onEnter={(c, p) => setView({ kind: 'run', chapter: c, part: p })} />
+    </>
+  );
+}
+
+/** 교전 중인 개인 보스 목록 */
+function BossList({ s, go, onBack }: { s: PlayerState; go: Go; onBack: () => void }) {
+  const b = s.raid.boss;
+  return (
+    <div>
+      <div className="row between" style={{ marginBottom: 8 }}>
+        <button className="btn sm" onClick={onBack}>◀ 퀘스트</button>
+        <span className="small muted">보스 입장권 {s.tickets}/{TICKET_CAP}</span>
+      </div>
+      <h2 style={{ marginTop: 0 }}>교전 중인 보스</h2>
+      {b ? (
+        <button className="panel bossrow" style={{ width: '100%' }} onClick={() => go('boss', null, 'personal')}>
+          <span className="bg">{b.glyph}</span>
+          <span className="grow">
+            <span className="row between small"><b>{b.name}</b><span className="muted">{hoursLeft(b.expiresAt - Date.now())}</span></span>
+            <Bar value={b.hp} max={b.maxHp} kind="hp" />
+            <span className="small muted">{b.kind} · HP {fmt(b.hp)} / {fmt(b.maxHp)} · 내 피해 {fmt(b.dealtByMe)}</span>
+          </span>
+        </button>
+      ) : <p className="muted">지금 교전 중인 보스가 없어요.</p>}
+      <p className="muted small">개인 보스는 72시간 동안 머물러요. 쓰러뜨리면 다음 보스가 나타나요. 주간 공유 보스는 홈에서 볼 수 있어요.</p>
+    </div>
+  );
 }
 
 /** 퀘스트에서 얻었거나 지금 보유 중인 카드 → 드랍 칸 공개 */
@@ -283,7 +319,7 @@ function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run:
               <b>{displayName(dropCard)}</b>
               <div className="muted">{rankOf(dropCard)} · {FACTIONS[master(dropCard.cardId).faction].name}</div>
               <div style={{ marginTop: 6 }}>판매가 <b>{fmt(sellPrice(dropCard))}</b> {CURRENCY.silver.name}</div>
-              <div>보유 카드 {s.cards.length}/{INVENTORY_CAP}</div>
+              <div>보유 카드 {s.cards.length}/{inventoryCap(s)}</div>
               <div>이 카드 보유 {sameCount}장</div>
             </div>
           </div>

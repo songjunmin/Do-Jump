@@ -13,6 +13,30 @@ import * as P from './game/player';
 import { tierOf, type Ctx, type Opponent, type PlayerState } from './game/player';
 
 const GHOST_COLLECTION = 'defense_decks';
+const WEEKLY_COLLECTION = 'weekly_boss';
+
+interface WeeklyDoc { weekKey: number; typeId: string; name: string; glyph: string; kind: string; hp: number; maxHp: number; power: number; defeatedAt: number | null; engagements: number }
+
+/** 이번 주 공유 보스 문서 (없으면 만든다) */
+async function weeklyDoc(c: Ctx): Promise<WeeklyDoc> {
+  const wk = P.weekKey(c.now);
+  const id = `w${wk}`;
+  let found: WeeklyDoc | null = null;
+  try { found = (await $global.getCollectionItem(WEEKLY_COLLECTION, id)) as unknown as WeeklyDoc; } catch { found = null; }
+  if (found) return found;
+  {
+    const t = P.weeklyBossType(c.now);
+    const doc: WeeklyDoc = { weekKey: wk, typeId: t.id, name: t.name, glyph: t.glyph, kind: t.kind, hp: t.hp, maxHp: t.hp, power: t.power, defeatedAt: null, engagements: 0 };
+    try { await $global.addCollectionItem(WEEKLY_COLLECTION, doc, { id }); } catch { /* 동시에 만든 경우 */ }
+    return doc;
+  }
+}
+
+/** 클라이언트에 보내는 주간 보스 요약 */
+function weeklyView(d: WeeklyDoc, s: PlayerState, c: Ctx) {
+  const endsAt = (d.weekKey + 1) * 7 * 86_400_000 - 3 * 86_400_000 - 9 * 3_600_000;
+  return { ...d, endsAt, myDealt: s.weekly.dealt, myEngagements: s.weekly.engagements, claimed: s.weekly.claimed, contribution: d.maxHp ? s.weekly.dealt / d.maxHp : 0, now: c.now };
+}
 
 interface GhostDeck { account: string; name: string; score: number; faction: FactionId; deck: Opponent['deck']; updatedAt: number }
 
@@ -134,10 +158,10 @@ export class Server {
   }
 
   /** 은화 뽑기 (1회 / 10회) */
-  async gacha(count: number) {
+  async gacha(count: number, pack: 'normal' | 'pickup' = 'normal') {
     const c = ctx();
     const s = await loadOrThrow(c);
-    const result = P.gacha(s, Number(count), c);
+    const result = P.gacha(s, Number(count), c, pack === 'pickup' ? 'pickup' : 'normal');
     await save(s);
     return { ...view(s, c), result };
   }
@@ -247,6 +271,51 @@ export class Server {
     const s = await loadOrThrow(c);
     const result = P.raidAction(s, c);
     await save(s);
+    return { ...view(s, c), result };
+  }
+
+  /** 주간 공유 보스 상태 */
+  async weeklyBoss() {
+    const c = ctx();
+    const s = await loadOrThrow(c);
+    const d = await weeklyDoc(c);
+    await save(s);
+    return { ...view(s, c), result: weeklyView(d, s, c) };
+  }
+
+  /** 주간 공유 보스 교전 1회 (입장권 1). 공유 HP를 깎는다 */
+  async weeklyEngage() {
+    const c = ctx();
+    const s = await loadOrThrow(c);
+    const d = await weeklyDoc(c);
+    const result = P.weeklyAction(s, { hp: d.hp, power: d.power }, c);
+    // 저장 직전에 다시 읽어 다른 플레이어의 피해와 합친다
+    const latest = await weeklyDoc(c);
+    latest.hp = Math.max(0, latest.hp - result.dealt);
+    latest.engagements = (latest.engagements || 0) + 1;
+    if (latest.hp <= 0 && !latest.defeatedAt) latest.defeatedAt = c.now;
+    await $global.updateCollectionItem(WEEKLY_COLLECTION, { __id: `w${latest.weekKey}`, ...latest } as any);
+    await save(s);
+    return { ...view(s, c), result: { result, boss: weeklyView(latest, s, c) } };
+  }
+
+  /** 주간 보스 격파 보상 수령 (기여자 전원) */
+  async weeklyClaim() {
+    const c = ctx();
+    const s = await loadOrThrow(c);
+    const d = await weeklyDoc(c);
+    const result = P.weeklyClaim(s, d.hp <= 0);
+    await save(s);
+    return { ...view(s, c), result };
+  }
+
+  /** 상점 구매 (결제 연동 전: 프로토타입 무료) */
+  async buyShop(item: P.ShopItem) {
+    const c = ctx();
+    const s = await loadOrThrow(c);
+    const result = P.buyShop(s, item);
+    await save(s);
+    await publishGhost(s, c);
     return { ...view(s, c), result };
   }
 

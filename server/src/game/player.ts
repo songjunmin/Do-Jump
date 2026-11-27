@@ -1,6 +1,6 @@
 // 플레이어 상태와 행동. 순수 함수로 두고 server.ts가 저장·불러오기만 맡는다.
 import * as C from './config';
-import { BOSSES, BOTS, CARDS, CARD_MAP, type FactionId } from './data';
+import { BOSSES, BOTS, CARDS, CARD_MAP, WEEKLY_BOSSES, type FactionId } from './data';
 import { displayName, isMaxed, master, newInstance, rankOf, toBattleCard, type BattleCard, type CardInstance } from './cards';
 import { applyEnhance, applyEvolve } from './growth';
 import { duel as runDuel, raidEngage as runRaid, leaderBattle, type DuelResult, type RaidResult, type Rng } from './engine';
@@ -38,6 +38,12 @@ export interface PlayerState {
   quest: QuestState;
   duel: { score: number; weekKey: number; bestTier: number; dayKey: number; used: number; wins: number; losses: number; recent: Record<string, number> };
   raid: { boss: PersonalBoss | null; kills: number; engagements: number };
+  /** 주간 공유 보스 내 기여 */
+  weekly: { weekKey: number; dealt: number; engagements: number; claimed: boolean };
+  /** 뽑기 천장 카운터 */
+  gacha: { pity: number; total: number };
+  /** 인벤토리 상한 (확장 가능) */
+  invCap: number;
   flags: { evolveHintShown: boolean };
   notices: string[];
   createdAt: number;
@@ -80,7 +86,7 @@ export interface QuestState {
 const emptyDeck = (): DeckIds => [null, null, null, null, null];
 const dayKey = (now: number) => Math.floor((now + C.TZ_OFFSET_MS) / 86_400_000);
 /** 월요일 00:00 (KST) 기준 주 번호. 1970-01-01은 목요일 → +3일 보정 */
-const weekKey = (now: number) => Math.floor((dayKey(now) + 3) / 7);
+export const weekKey = (now: number) => Math.floor((dayKey(now) + 3) / 7);
 
 export const tierOf = (score: number) => {
   let t = 0;
@@ -90,8 +96,10 @@ export const tierOf = (score: number) => {
 export const staminaMax = (s: PlayerState) => s.maxStamina;
 export const reserveMax = (s: PlayerState) => s.maxStamina * C.STAMINA_RESERVE_MULT;
 
+export const inventoryCap = (s: PlayerState) => s.invCap ?? C.INVENTORY_CAP;
+
 function grantCard(s: PlayerState, cardId: string, now: number, form = 1, level = 1): CardInstance | null {
-  if (s.cards.length >= C.INVENTORY_CAP) return null;
+  if (s.cards.length >= inventoryCap(s)) return null;
   const inst = newInstance(cardId, `c${++s.seq}`, now, form, level);
   s.cards.push(inst);
   return inst;
@@ -115,6 +123,9 @@ export function createPlayer(name: string, faction: FactionId, ctx: Ctx): Player
     quest: initQuest(),
     duel: { score: 0, weekKey: weekKey(ctx.now), bestTier: 0, dayKey: dayKey(ctx.now), used: 0, wins: 0, losses: 0, recent: {} },
     raid: { boss: null, kills: 0, engagements: 0 },
+    weekly: { weekKey: weekKey(ctx.now), dealt: 0, engagements: 0, claimed: false },
+    gacha: { pity: 0, total: 0 },
+    invCap: C.INVENTORY_CAP,
     flags: { evolveHintShown: false },
     notices: [],
     createdAt: ctx.now,
@@ -142,6 +153,9 @@ export function tick(s: PlayerState, ctx: Ctx): void {
   const now = ctx.now;
   if (!s.quest || (s.quest as any).v !== 3) { s.quest = initQuest(); s.quest.leader = s.presets[0]?.atk[2] ?? s.cards[0]?.uid ?? null; }
   if (!s.quest.found) s.quest.found = {};
+  if (!s.gacha) s.gacha = { pity: 0, total: 0 };
+  if (typeof s.invCap !== 'number') s.invCap = C.INVENTORY_CAP;
+  if (!s.weekly || s.weekly.weekKey !== weekKey(now)) s.weekly = { weekKey: weekKey(now), dealt: 0, engagements: 0, claimed: false };
   // 체력 상한을 속성 포인트로 올리는 방식으로 바뀌기 전 데이터
   if (typeof s.maxStamina !== 'number') { s.maxStamina = C.STAMINA_START_MAX; s.stamina = Math.min(s.stamina, s.maxStamina); s.staminaReserve = Math.min(s.staminaReserve, reserveMax(s)); }
   if (s.quest.leader && !s.cards.some((c) => c.uid === s.quest.leader)) s.quest.leader = null;
@@ -421,22 +435,83 @@ export function questStep(s: PlayerState, chapter: number, part: number, ctx: Ct
   };
 }
 
-/** 은화 뽑기: 1회 또는 10회 */
-export function gacha(s: PlayerState, count: number, ctx: Ctx) {
+/** 은화 뽑기: 1회 또는 10회. pack = 일반 / 픽업. 천장 GACHA_PITY회 안에 HR 확정 */
+export function gacha(s: PlayerState, count: number, ctx: Ctx, pack: 'normal' | 'pickup' = 'normal') {
   if (count !== 1 && count !== 10) throw new Error('1회 또는 10회만 뽑을 수 있습니다.');
+  if (pack === 'pickup' && !C.PICKUP) throw new Error('진행 중인 픽업이 없습니다.');
   const cost = C.gachaCost(count);
   if (s.silver < cost) throw new Error(`은화가 부족합니다. (필요 ${cost.toLocaleString()})`);
-  if (s.cards.length + count > C.INVENTORY_CAP) throw new Error(`보유 카드가 가득 찼습니다. (${s.cards.length}/${C.INVENTORY_CAP})`);
+  if (s.cards.length + count > inventoryCap(s)) throw new Error(`보유 카드가 가득 찼습니다. (${s.cards.length}/${inventoryCap(s)})`);
   s.silver -= cost;
   const got: string[] = [];
+  let pityHit = false;
   for (let i = 0; i < count; i++) {
-    let r = ctx.rng();
+    s.gacha.pity++;
+    s.gacha.total++;
     let rank: C.Rank = 'N';
-    for (const x of C.GACHA_RATES) { if (r < x.p) { rank = x.rank; break; } r -= x.p; }
-    const inst = grantCard(s, pick(cardsOf(rank), ctx.rng), ctx.now)!;
-    got.push(inst.uid);
+    if (s.gacha.pity >= C.GACHA_PITY) { rank = 'HR'; pityHit = true; }
+    else {
+      let r = ctx.rng();
+      for (const x of C.GACHA_RATES) { if (r < x.p) { rank = x.rank; break; } r -= x.p; }
+    }
+    let id = pick(cardsOf(rank), ctx.rng);
+    if (rank === 'HR' && pack === 'pickup' && C.PICKUP && ctx.rng() < C.PICKUP.rateUp) id = C.PICKUP.cardId;
+    if (rank === 'HR') s.gacha.pity = 0;
+    got.push(grantCard(s, id, ctx.now)!.uid);
   }
-  return { cost, cards: got };
+  return { cost, cards: got, pity: s.gacha.pity, pityHit };
+}
+
+/** 상점 품목 (결제 연동 전: 프로토타입에서만 무료 지급) */
+export type ShopItem = 'stardust' | 'vitality' | 'statReset' | 'faction' | 'inventory';
+export function buyShop(s: PlayerState, item: ShopItem) {
+  if (!C.PROTOTYPE_MODE) throw new Error('결제 연동 전입니다.');
+  switch (item) {
+    case 'stardust': s.stardust++; return { msg: `${'별가루'} +1` };
+    case 'vitality': s.vitality++; return { msg: '활력수 +1' };
+    case 'statReset': {
+      const refund = (s.atkCost - C.START_COST) + (s.defCost - C.START_COST) + (s.maxStamina - C.STAMINA_START_MAX);
+      if (refund <= 0) throw new Error('되돌릴 포인트가 없습니다.');
+      s.atkCost = C.START_COST; s.defCost = C.START_COST; s.maxStamina = C.STAMINA_START_MAX;
+      s.stamina = Math.min(s.stamina, s.maxStamina);
+      s.statPoints += refund;
+      return { msg: `속성 포인트 ${refund} 반환` };
+    }
+    case 'faction': s.faction = s.faction === 'dawn' ? 'dusk' : 'dawn'; return { msg: '진형 변경 완료' };
+    case 'inventory':
+      if (inventoryCap(s) >= C.INVENTORY_MAX) throw new Error(`최대 ${C.INVENTORY_MAX}장까지 확장할 수 있습니다.`);
+      s.invCap = inventoryCap(s) + C.INVENTORY_EXPAND;
+      return { msg: `보유 한도 ${s.invCap}장` };
+    default: throw new Error('없는 상품입니다.');
+  }
+}
+
+/** 주간 공유 보스 (이번 주 종류) */
+export const weeklyBossType = (now: number) => WEEKLY_BOSSES[weekKey(now) % WEEKLY_BOSSES.length];
+
+/** 주간 공유 보스 교전 1회 (입장권 1). boss는 공유 문서에서 읽은 현재 HP */
+export function weeklyAction(s: PlayerState, boss: { hp: number; power: number }, ctx: Ctx) {
+  if (boss.hp <= 0) throw new Error('이번 주 보스는 이미 쓰러졌습니다.');
+  if (s.tickets <= 0) throw new Error('보스 입장권이 없습니다.');
+  const atk = activeDeck(s, 'atk');
+  const def = activeDeck(s, 'def');
+  if (deckIsEmpty(atk) || deckIsEmpty(def)) throw new Error('공격 덱과 방어 덱을 모두 편성하세요.');
+  if (s.tickets >= C.TICKET_CAP) s.ticketAt = ctx.now;
+  s.tickets--;
+  const result = runRaid(atk, def, s.faction, boss, ctx.rng);
+  s.weekly.dealt += result.dealt;
+  s.weekly.engagements++;
+  return result;
+}
+
+export function weeklyClaim(s: PlayerState, defeated: boolean) {
+  if (!defeated) throw new Error('보스가 쓰러진 뒤에 받을 수 있습니다.');
+  if (s.weekly.dealt <= 0) throw new Error('이번 주 보스에 기여하지 않았습니다.');
+  if (s.weekly.claimed) throw new Error('이미 받았습니다.');
+  s.weekly.claimed = true;
+  s.silver += C.WEEKLY_REWARD.silver;
+  s.stardust += C.WEEKLY_REWARD.stardust;
+  return { ...C.WEEKLY_REWARD };
 }
 
 /** 카드 판매가: 등급 기본가 × 투입 장수 + 레벨 보정 */

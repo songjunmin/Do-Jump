@@ -16,7 +16,8 @@ export function CardView({ c, onClick, selected, dim, badge, inDeck, stat }: {
   return (
     <button className={`card${selected ? ' sel' : ''}${dim ? ' dim' : ''}`} style={{ ['--rc' as any]: `var(--r-${rank})` }} onClick={onClick}>
       {badge != null && <span className="badge">{badge}</span>}
-      <div className="art" style={{ background: `linear-gradient(160deg, ${fc}55, #15161f 75%)` }}>
+      <div className={`art f${c.form}`} style={{ background: `linear-gradient(160deg, ${fc}55, #15161f 75%)`, ['--fc' as any]: fc }}>
+        <ArtLayers form={c.form} />
         <span className="rk">{rank}</span>
         <span className="cost">{m.cost}</span>
         <span>{m.glyph}</span>
@@ -32,6 +33,30 @@ export function CardView({ c, onClick, selected, dim, badge, inDeck, stat }: {
       )}
       <div className="skill">{sk ? sk.name : m.style === 'def' ? '— 깡방' : '— 깡공'}</div>
     </button>
+  );
+}
+
+/** 진화 단계별 아트 장식: 2단계 오라, 3단계 문양 고리, 4단계 금빛 후광·광선·왕관 */
+export function ArtLayers({ form }: { form: number }) {
+  return (
+    <>
+      {form >= 4 && <span className="ly rays" />}
+      {form >= 2 && <span className="ly aura" />}
+      {form >= 3 && <span className="ly ring" />}
+      {form >= 4 && <span className="ly crown">♛</span>}
+    </>
+  );
+}
+
+/** 카드 아트만 (프레임 없이). 상점 배너·진화 미리보기용 */
+export function CardArt({ cardId, form, big, silhouette }: { cardId: string; form: number; big?: boolean; silhouette?: boolean }) {
+  const m = master(cardId);
+  const fc = FACTIONS[m.faction].color;
+  return (
+    <div className={`cart f${form}${big ? ' big' : ''}${silhouette ? ' sil' : ''}`} style={{ background: `linear-gradient(160deg, ${fc}66, #15161f 80%)`, ['--fc' as any]: fc }}>
+      <ArtLayers form={form} />
+      <span className="g">{m.glyph}</span>
+    </div>
   );
 }
 

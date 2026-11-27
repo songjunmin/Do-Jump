@@ -51,10 +51,14 @@ export const TICKET_CAP = 10;
 export const TICKET_HARD_CAP = 20;
 export const STARDUST_TICKETS = 10;
 export const DUEL_DAILY_ATTEMPTS = 10;
+/** 체력 상한 외 시작 코스트 (스탯 리셋 기준) */
 export const START_COST = 60;
 export const POINTS_PER_LEVEL = 3;
 export const POINTS_PER_PART = 1;
 export const INVENTORY_CAP = 200;
+/** 인벤토리 확장 1회 +20, 최대 400 */
+export const INVENTORY_EXPAND = 20;
+export const INVENTORY_MAX = 400;
 /** 플레이어 레벨업 경험치 (Lv1 → 10) */
 export const playerExpToNext = (level: number) => 5 + level * 5;
 
@@ -63,6 +67,13 @@ export const GACHA_COST = 1_000;
 export const GACHA_RATES: { rank: Rank; p: number }[] = [
   { rank: 'N', p: 0.6 }, { rank: 'HN', p: 0.28 }, { rank: 'R', p: 0.1 }, { rank: 'HR', p: 0.02 },
 ];
+/** 천장: 이 횟수 안에 HR이 안 나오면 HR 확정 */
+export const GACHA_PITY = 100;
+/** 픽업 배너 (없으면 null). HR이 나올 때 rateUp 확률로 픽업 카드 */
+export const PICKUP: { id: string; cardId: string; title: string; rateUp: number } | null =
+  { id: 'pu_eclipse', cardId: 'hr_eclipse', title: '월식의 마녀 픽업', rateUp: 0.5 };
+/** 주간 공유 보스 격파 보상 (기여한 플레이어 모두) */
+export const WEEKLY_REWARD = { silver: 20_000, stardust: 1 };
 export const gachaCost = (count: number) => (count >= 10 ? GACHA_COST * (count - 1) : GACHA_COST * count);
 
 /** 카드 판매 기본가 (등급별) */
