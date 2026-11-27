@@ -6,7 +6,7 @@ import { hoursLeft } from './Raid';
 import { canEnterPart, chapterAllCleared, inventoryCap, leaderCard, sellPrice, staminaMax, type AdventureStep, type PlayerState } from '../../server/src/game/player';
 import { CHAPTERS, partKey, stepExp, stepSilver, stepsToClear, type Chapter } from '../../server/src/game/questData';
 import { fxOf } from '../ui/fx';
-import { LEADER_HP_MULT, TICKET_CAP, POINTS_PER_LEVEL, playerExpToNext } from '../../server/src/game/config';
+import { TICKET_CAP, POINTS_PER_LEVEL, playerExpToNext } from '../../server/src/game/config';
 import { displayName, master, rankOf, statsOf, toBattleCard } from '../../server/src/game/cards';
 import { CARD_MAP, CURRENCY, FACTIONS } from '../../server/src/game/data';
 import type { LeaderBattleResult } from '../../server/src/game/engine';
@@ -157,7 +157,7 @@ function QuestList({ s, run, busy, chapterId, setChapterId, onEnter }: {
             <div className="muted small">
               {bossDone ? '클리어 (재도전 불가)' : allCleared ? `HP ${fmt(ch.boss.hp)} · 공격 ${fmt(ch.boss.atk)} · 리더 1장으로 자동 전투` : '모든 파트를 100% 완료하면 열립니다'}
             </div>
-            {leader && allCleared && !bossDone && <div className="muted small">리더 공격 {fmt(statsOf(leader).atk)} · 체력 {fmt(statsOf(leader).def * LEADER_HP_MULT)}</div>}
+            {leader && allCleared && !bossDone && <div className="muted small">리더 공격 {fmt(statsOf(leader).atk)} · HP(방어력) {fmt(statsOf(leader).def)}</div>}
           </div>
           <button className="btn sm primary" disabled={busy || !allCleared || bossDone || !leader} onClick={async () => {
             const r = await run<any>('questBoss', ch.id);
@@ -345,7 +345,6 @@ function QuestRun({ s, run, say, chapter, part, onExit }: { s: PlayerState; run:
         <Modal title="체력 부족" onClose={() => setRecover(false)}>
           <p className="small">이 파트는 한 걸음에 체력 {qp.stamina}이(가) 필요해요. 지금 체력 {s.stamina}.</p>
           <div className="row wrap" style={{ gap: 6 }}>
-            <button className="btn" disabled={s.staminaReserve <= 0} onClick={async () => { const r = await run<any>('claimReserve'); if (r) say(`예비 체력 ${r.amount} 수령`); }}>예비 체력 수령 ({s.staminaReserve})</button>
             <button className="btn" disabled={s.vitality <= 0} onClick={() => run('useVitality')}>{CURRENCY.vitality.name} 사용 ({s.vitality}개)</button>
           </div>
           <p className="muted small">체력은 1분에 1씩 회복돼요.</p>

@@ -107,11 +107,6 @@ export default function Home({ s, run, busy, say, go, weekly, setWeekly }: {
       </div>
 
       {/* 4. 조건부: 할 일이 있을 때만 */}
-      {s.staminaReserve > 0 && (
-        <button className="panel alert-card" disabled={busy} onClick={async () => { const r = await run<any>('claimReserve'); if (r) say(`예비 체력 ${r.amount} 수령`); }}>
-          <span>🔋 예비 체력 <b>{s.staminaReserve}</b> 수령</span><span className="muted small">체력이 가득 찬 동안 쌓인 체력</span>
-        </button>
-      )}
       {boss && bossLeft < 24 * 3_600_000 && (
         <button className="panel alert-card warn" onClick={() => go('boss', null, 'personal')}>
           <span>⏳ {boss.name} 마감 {hoursLeft(bossLeft)} 전</span><span className="muted small">떠나기 전에 처치하세요</span>
@@ -166,10 +161,10 @@ function StatCard({ s, run, busy }: { s: PlayerState; run: Run; busy: boolean })
   const [add, setAdd] = useState({ hp: 0, atk: 0, def: 0 });
   const used = add.hp + add.atk + add.def;
   const left = s.statPoints - used;
-  const rows: { k: keyof typeof add; label: string; base: number; color?: string }[] = [
-    { k: 'hp', label: '체력', base: staminaMax(s) },
-    { k: 'atk', label: '공격 코스트', base: s.atkCost, color: 'var(--atk)' },
-    { k: 'def', label: '방어 코스트', base: s.defCost, color: 'var(--def)' },
+  const rows: { k: keyof typeof add; label: string; base: number; per: number; color?: string }[] = [
+    { k: 'hp', label: '체력', base: staminaMax(s), per: C.STAMINA_PER_POINT },
+    { k: 'atk', label: '공격 코스트', base: s.atkCost, per: 1, color: 'var(--atk)' },
+    { k: 'def', label: '방어 코스트', base: s.defCost, per: 1, color: 'var(--def)' },
   ];
   return (
     <div className={`panel statcard${s.statPoints > 0 ? ' has' : ''}`}>
@@ -177,8 +172,8 @@ function StatCard({ s, run, busy }: { s: PlayerState; run: Run; busy: boolean })
       {rows.map((r) => (
         <div key={r.k} className="statrow">
           <span className="grow">{r.label}</span>
-          <b style={{ color: r.color }}>{r.base + add[r.k]}</b>
-          <span className="plus">{add[r.k] > 0 ? `+${add[r.k]}` : ""}</span>
+          <b style={{ color: r.color }}>{r.base + add[r.k] * r.per}</b>
+          <span className="plus">{add[r.k] > 0 ? `+${add[r.k] * r.per}` : ''}</span>
           <button className="btn sm" disabled={add[r.k] <= 0} onClick={() => setAdd({ ...add, [r.k]: add[r.k] - 1 })} aria-label={`${r.label} 빼기`}>−</button>
           <button className="btn sm" disabled={left <= 0} onClick={() => setAdd({ ...add, [r.k]: add[r.k] + 1 })} aria-label={`${r.label} 더하기`}>+</button>
         </div>
@@ -202,16 +197,14 @@ function HeroCard({ c, evolved, onClick }: { c: CardInstance; evolved: boolean; 
       <div className={`hero-art art f${c.form}`} style={{ background: `linear-gradient(165deg, ${fc}77, #15161f 78%)` }}>
         <ArtLayers form={c.form} />
         <span className="hero-glyph">{m.glyph}</span>
-        <span className="hb rk">{rank}</span>
         <span className="hb cost">{m.cost}</span>
-        <span className="hb stats"><b className="a">공 {fmt(st.atk)}</b><b className="d">방 {fmt(st.def)}</b></span>
-        <span className="hb skill">{sk ? sk.name : m.style === 'def' ? '깡방' : '깡공'}</span>
         <span className="hero-overlay">
           <b>{displayName(c)}</b>
           <span>{rank} · {FACTIONS[m.faction].name} · Lv {c.level}/{levelCap(c)}</span>
         </span>
         {evolved && <span className="evo-banner">진화! 새로운 모습</span>}
       </div>
+      <div className="hero-stats-line"><span className="a">공 {fmt(st.atk)}</span><span className="d">방 {fmt(st.def)}</span><span className="sk">{sk ? sk.name : m.style === 'def' ? '깡방' : '깡공'}</span></div>
     </button>
   );
 }

@@ -1,6 +1,6 @@
 // 순수 로직 단위 테스트 (bun test server/unit)
 import { describe, expect, test } from 'bun:test';
-import { duel, raidEngage, rollSkills } from '../src/game/engine';
+import { duel, raidEngage, rollSkills, leaderBattle } from '../src/game/engine';
 import { newInstance, toBattleCard, statsOf, levelCap } from '../src/game/cards';
 import { applyEvolve } from '../src/game/growth';
 import * as P from '../src/game/player';
@@ -92,5 +92,19 @@ describe('덱 코스트', () => {
     s.atkCost = 20;
     const ids = s.presets[0].atk;
     expect(() => P.saveDeck(s, 0, 'atk', ids)).toThrow('코스트 초과');
+  });
+});
+
+describe('장 보스 (리더 1장)', () => {
+  const leader = { uid: 'x', cardId: 'r_lancer', name: 't', rank: 'R', faction: 'dawn', form: 1, level: 1, atk: 100, def: 250, cost: 1, skill: null } as any;
+  test('리더 HP = 방어력, 리더 공격 먼저', () => {
+    const r = leaderBattle(leader, { hp: 300, atk: 100 });
+    expect(r.leaderHp).toBe(250);
+    expect(r.turns[0].by).toBe('leader');
+    expect(r.win).toBe(true); // 3타 필요, 보스는 2번만 반격(200 < 250)
+  });
+  test('먼저 HP가 0이 되면 패배', () => {
+    const r = leaderBattle(leader, { hp: 400, atk: 130 });
+    expect(r.win).toBe(false); // 4타 필요, 보스 2타째에 260 ≥ 250
   });
 });

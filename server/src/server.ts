@@ -124,14 +124,6 @@ export class Server {
     return view(s, c);
   }
 
-  async claimReserve() {
-    const c = ctx();
-    const s = await loadOrThrow(c);
-    const amount = P.claimReserve(s);
-    await save(s);
-    return { ...view(s, c), result: { amount } };
-  }
-
   async useVitality() {
     const c = ctx();
     const s = await loadOrThrow(c);

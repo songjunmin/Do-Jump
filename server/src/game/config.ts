@@ -41,11 +41,11 @@ export const enhanceCost = (level: number, materials: number) => materials * (50
 export const evolveCost = (rankIdx: number, form: number) => 1000 * (rankIdx + 1) * form;
 
 /** 플레이어 자원 (§4) */
-/** 체력 상한 시작값. 이후 속성 포인트 1 = 체력 상한 +1 */
-export const STAMINA_START_MAX = 35;
+/** 체력 상한 시작값. 속성 포인트 1 = 체력 상한 +STAMINA_PER_POINT */
+export const STAMINA_START_MAX = 150;
+export const STAMINA_PER_POINT = 3;
+/** 1분당 1 회복. 가득 찬 동안은 회복이 멈추고 넘치는 양은 버린다 */
 export const STAMINA_REGEN_MS = 60_000;
-/** 예비 체력 풀 상한 = 체력 상한 × 3 */
-export const STAMINA_RESERVE_MULT = 3;
 export const TICKET_REGEN_MS = 3 * 60 * 60_000;
 export const TICKET_CAP = 10;
 export const TICKET_HARD_CAP = 20;
@@ -78,9 +78,9 @@ export const gachaCost = (count: number) => (count >= 10 ? GACHA_COST * (count -
 
 /** 카드 판매 기본가 (등급별) */
 export const SELL_PRICE: Record<Rank, number> = { N: 50, HN: 100, R: 300, HR: 1000, SR: 3000, SSR: 8000, LG: 20000 };
-/** 보스전에서 리더 카드의 체력 = 방어력 × 배수 */
-export const LEADER_HP_MULT = 3;
-export const LEADER_MAX_TURNS = 40;
+/** 장 보스전에서 리더 카드의 HP = 방어력 (스킬 없음) */
+/** 무한 루프 방지용 안전장치 (양쪽 모두 피해가 0보다 커서 실제로는 닿지 않음) */
+export const LEADER_MAX_TURNS = 10_000;
 
 /** 결투장 (§5.2) */
 export const TIERS = [

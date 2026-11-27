@@ -105,16 +105,18 @@ describe('퀘스트', () => {
     expect(r.state.cards.length).toBe(s.cards.length - 1);
   });
 
-  test('체력 상한 35에서 시작, 속성 포인트로 체력·공격·방어 분배', async (server) => {
+  test('체력 상한 150에서 시작, 체력 1포인트 = +3, 공격·방어 +1', async (server) => {
     const s = await setup(server);
-    expect(s.maxStamina).toBe(35);
-    expect(s.stamina).toBe(35);
+    expect(s.maxStamina).toBe(150);
+    expect(s.stamina).toBe(150);
+    expect(s.staminaReserve).toBe(undefined);
     let r: any;
     do { r = await server.questStep(1, 1); } while (!r.result.partClear);
     const st = (await server.getState()).state;
     expect(st.statPoints).toBeGreaterThan(2);
     const a = await server.allocate(1, 1, 1);
-    expect(a.state.maxStamina).toBe(36);
+    expect(a.state.maxStamina).toBe(153);
+    expect(a.state.stamina).toBe(st.stamina + 3);
     expect(a.state.atkCost).toBe(st.atkCost + 1);
     expect(a.state.defCost).toBe(st.defCost + 1);
     expect(a.state.statPoints).toBe(st.statPoints - 3);
@@ -158,7 +160,7 @@ describe('퀘스트', () => {
     await server.allocate(1, 1, 1);
     const reset = await server.buyShop('statReset');
     expect(reset.state.statPoints).toBe(before.statPoints);
-    expect(reset.state.maxStamina).toBe(35);
+    expect(reset.state.maxStamina).toBe(150);
     const inv = await server.buyShop('inventory');
     expect(inv.state.invCap).toBe(220);
     const fac = await server.buyShop('faction');

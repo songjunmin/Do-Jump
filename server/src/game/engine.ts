@@ -1,5 +1,5 @@
 // 전투 엔진 (§3). 서버에서만 호출한다. 클라이언트는 결과를 받아 연출만 재생한다.
-import { FACTION_BONUS, LEADER_HP_MULT, LEADER_MAX_TURNS, MAX_SKILLS_APPLIED, SLOT_CHANCE, SLOT_PRIORITY } from './config';
+import { FACTION_BONUS, LEADER_MAX_TURNS, MAX_SKILLS_APPLIED, SLOT_CHANCE, SLOT_PRIORITY } from './config';
 import { SKILLS, type FactionId, type SkillType } from './data';
 import type { BattleCard } from './cards';
 
@@ -157,7 +157,8 @@ export interface LeaderBattleResult {
  * 리더 체력 = 방어력 × 3. 리더가 먼저 공격하고, 정해진 턴 안에 쓰러뜨리지 못하면 패배.
  */
 export function leaderBattle(leader: BattleCard, boss: { hp: number; atk: number }): LeaderBattleResult {
-  let lhp = Math.round(leader.def * LEADER_HP_MULT);
+  // 리더 HP = 방어력. 리더 공격 먼저 → 보스 반격 반복, 스킬 없음
+  let lhp = leader.def;
   let bhp = boss.hp;
   const turns: LeaderBattleResult['turns'] = [];
   for (let i = 0; i < LEADER_MAX_TURNS && lhp > 0 && bhp > 0; i++) {
@@ -169,5 +170,5 @@ export function leaderBattle(leader: BattleCard, boss: { hp: number; atk: number
     lhp -= e;
     turns.push({ by: 'boss', dmg: e, leaderHp: lhp, bossHp: bhp });
   }
-  return { leader, leaderHp: Math.round(leader.def * LEADER_HP_MULT), bossHp: boss.hp, win: bhp <= 0, turns };
+  return { leader, leaderHp: leader.def, bossHp: boss.hp, win: bhp <= 0, turns };
 }

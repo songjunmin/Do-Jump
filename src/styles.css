@@ -319,7 +319,7 @@ input[type=text] { width: 100%; background: var(--bg2); border: 1px solid var(--
 .hero-glyph { position: relative; line-height: 1; filter: drop-shadow(0 6px 10px rgba(0,0,0,.6)); }
 .hero .hb { position: absolute; font-size: 11px; font-weight: 800; text-shadow: 0 1px 2px #000; }
 .hero .hb.rk { top: 6px; left: 8px; color: var(--rc); font-size: 14px; }
-.hero .hb.cost { top: 6px; right: 8px; background: rgba(0,0,0,.6); border-radius: 8px; padding: 1px 7px; }
+.hero .hb.cost { top: 6px; left: 8px; background: rgba(0,0,0,.6); border-radius: 8px; padding: 1px 7px; }
 .hero .hb.stats { top: 30px; left: 8px; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .hero .hb.stats b { background: rgba(0,0,0,.55); border-radius: 6px; padding: 1px 6px; }
 .hero .hb.stats .a { color: var(--atk); } .hero .hb.stats .d { color: var(--def); }
@@ -363,3 +363,7 @@ table.rates { width: 100%; margin-top: 6px; font-size: 12px; border-collapse: co
 table.rates td { padding: 3px 0; border-top: 1px solid var(--line); }
 table.rates td:last-child { text-align: right; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .ly.ring, .ly.rays, .hero.evolved, .evo-banner { animation: none; } }
+
+.hero-stats-line { display: flex; justify-content: center; align-items: center; gap: 10px; white-space: nowrap; padding: 7px 8px; font-size: 13px; font-weight: 700; background: #0f1016; border-top: 1px solid var(--line); }
+.hero-stats-line .a { color: var(--atk); } .hero-stats-line .d { color: var(--def); } .hero-stats-line .sk { color: #e8e2cf; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.hero-stats-line > span { flex: none; white-space: nowrap; } .hero-stats-line .sk { flex: 0 1 auto; min-width: 0; }

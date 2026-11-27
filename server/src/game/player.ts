@@ -24,7 +24,6 @@ export interface PlayerState {
   /** 체력 상한 (속성 포인트로 올림) */
   maxStamina: number;
   staminaAt: number;
-  staminaReserve: number;
   tickets: number;
   ticketAt: number;
   silver: number;
@@ -94,7 +93,6 @@ export const tierOf = (score: number) => {
   return t;
 };
 export const staminaMax = (s: PlayerState) => s.maxStamina;
-export const reserveMax = (s: PlayerState) => s.maxStamina * C.STAMINA_RESERVE_MULT;
 
 export const inventoryCap = (s: PlayerState) => s.invCap ?? C.INVENTORY_CAP;
 
@@ -114,7 +112,7 @@ export function createPlayer(name: string, faction: FactionId, ctx: Ctx): Player
   const s: PlayerState = {
     v: 1, name: (name || '모험가').slice(0, 12), faction, level: 1, exp: 0, statPoints: 0,
     atkCost: C.START_COST, defCost: C.START_COST,
-    stamina: C.STAMINA_START_MAX, maxStamina: C.STAMINA_START_MAX, staminaAt: ctx.now, staminaReserve: 0,
+    stamina: C.STAMINA_START_MAX, maxStamina: C.STAMINA_START_MAX, staminaAt: ctx.now,
     tickets: C.TICKET_CAP, ticketAt: ctx.now,
     silver: 30_000, stardust: 1, vitality: 1, shards: { HR: 0, SR: 0, SSR: 0 },
     cards: [], seq: 0,
@@ -157,17 +155,20 @@ export function tick(s: PlayerState, ctx: Ctx): void {
   if (typeof s.invCap !== 'number') s.invCap = C.INVENTORY_CAP;
   if (!s.weekly || s.weekly.weekKey !== weekKey(now)) s.weekly = { weekKey: weekKey(now), dealt: 0, engagements: 0, claimed: false };
   // 체력 상한을 속성 포인트로 올리는 방식으로 바뀌기 전 데이터
-  if (typeof s.maxStamina !== 'number') { s.maxStamina = C.STAMINA_START_MAX; s.stamina = Math.min(s.stamina, s.maxStamina); s.staminaReserve = Math.min(s.staminaReserve, reserveMax(s)); }
+  // 이전 규칙(시작 35, 1포인트 = +1) 데이터: 체력에 쓴 포인트를 돌려주고 새 시작값으로
+  if (typeof s.maxStamina !== 'number') s.maxStamina = C.STAMINA_START_MAX;
+  if (s.maxStamina < C.STAMINA_START_MAX) { s.statPoints += Math.max(0, s.maxStamina - 35); s.maxStamina = C.STAMINA_START_MAX; }
+  if ('staminaReserve' in s) delete (s as any).staminaReserve;
   if (s.quest.leader && !s.cards.some((c) => c.uid === s.quest.leader)) s.quest.leader = null;
-  // 체력: 1분당 1, 상한 초과분은 예비 풀로
-  const gained = Math.floor((now - s.staminaAt) / C.STAMINA_REGEN_MS);
-  if (gained > 0) {
-    s.staminaAt += gained * C.STAMINA_REGEN_MS;
-    const max = staminaMax(s);
-    const room = Math.max(0, max - s.stamina);
-    const toMain = Math.min(room, gained);
-    s.stamina += toMain;
-    s.staminaReserve = Math.min(reserveMax(s), s.staminaReserve + (gained - toMain));
+  // 체력: 1분당 1. 가득 찬 동안은 타이머가 멈추고 넘치는 양은 버린다
+  if (s.stamina >= staminaMax(s)) s.staminaAt = now;
+  else {
+    const gained = Math.floor((now - s.staminaAt) / C.STAMINA_REGEN_MS);
+    if (gained > 0) {
+      s.staminaAt += gained * C.STAMINA_REGEN_MS;
+      s.stamina = Math.min(staminaMax(s), s.stamina + gained);
+      if (s.stamina >= staminaMax(s)) s.staminaAt = now;
+    }
   }
   // 보스 입장권: 3시간당 1, 상한 10 (별가루로 초과 보유한 분은 유지)
   if (s.tickets >= C.TICKET_CAP) s.ticketAt = now;
@@ -283,7 +284,7 @@ export function selectPreset(s: PlayerState, idx: number) {
   s.activePreset = idx;
 }
 
-/** 속성 포인트 분배: 체력 상한 / 공격 코스트 / 방어 코스트 (1포인트 = +1) */
+/** 속성 포인트 분배: 체력 상한 +3 / 공격 코스트 +1 / 방어 코스트 +1 (1포인트당) */
 export function allocate(s: PlayerState, atk: number, def: number, hp = 0) {
   const n = (x: number) => Math.max(0, Math.floor(Number(x) || 0));
   atk = n(atk); def = n(def); hp = n(hp);
@@ -293,24 +294,14 @@ export function allocate(s: PlayerState, atk: number, def: number, hp = 0) {
   s.statPoints -= total;
   s.atkCost += atk;
   s.defCost += def;
-  s.maxStamina += hp;
-  s.stamina += hp;
+  s.maxStamina += hp * C.STAMINA_PER_POINT;
+  s.stamina += hp * C.STAMINA_PER_POINT;
 }
 
 export function setFaction(s: PlayerState, f: FactionId) {
   if (f !== 'dawn' && f !== 'dusk') throw new Error('잘못된 진형입니다.');
   if (s.level >= 10) throw new Error('레벨 10 이후 진형 변경은 아직 지원하지 않습니다.');
   s.faction = f;
-}
-
-export function claimReserve(s: PlayerState) {
-  const room = staminaMax(s) - s.stamina;
-  if (s.staminaReserve <= 0) throw new Error('예비 체력이 없습니다.');
-  if (room <= 0) throw new Error('체력이 가득 찼습니다.');
-  const take = Math.min(room, s.staminaReserve);
-  s.stamina += take;
-  s.staminaReserve -= take;
-  return take;
 }
 
 export function useVitality(s: PlayerState) {
@@ -470,7 +461,7 @@ export function buyShop(s: PlayerState, item: ShopItem) {
     case 'stardust': s.stardust++; return { msg: `${'별가루'} +1` };
     case 'vitality': s.vitality++; return { msg: '활력수 +1' };
     case 'statReset': {
-      const refund = (s.atkCost - C.START_COST) + (s.defCost - C.START_COST) + (s.maxStamina - C.STAMINA_START_MAX);
+      const refund = (s.atkCost - C.START_COST) + (s.defCost - C.START_COST) + Math.floor((s.maxStamina - C.STAMINA_START_MAX) / C.STAMINA_PER_POINT);
       if (refund <= 0) throw new Error('되돌릴 포인트가 없습니다.');
       s.atkCost = C.START_COST; s.defCost = C.START_COST; s.maxStamina = C.STAMINA_START_MAX;
       s.stamina = Math.min(s.stamina, s.maxStamina);
