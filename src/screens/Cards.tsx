@@ -26,7 +26,10 @@ const SORTS: Record<SortKey, { label: string; fn: (a: CardInstance, b: CardInsta
   new: { label: '최근 획득순', fn: (a, b) => b.createdAt - a.createdAt || Number(b.uid.slice(1)) - Number(a.uid.slice(1)) },
 };
 
-export default function Cards({ s, run, busy, say }: { s: PlayerState; run: Run; busy: boolean; say: (m: string, e?: boolean) => void }) {
+export type CardsIntent = { pick: 'enhance' | 'evolve' } | null;
+
+export default function Cards({ s, run, busy, say, intent, clearIntent }: { s: PlayerState; run: Run; busy: boolean; say: (m: string, e?: boolean) => void; intent?: CardsIntent; clearIntent?: () => void }) {
+  const pick = intent?.pick ?? null;
   const [tab, setTab] = useState<'list' | 'sell'>('list');
   const [faction, setFaction] = useState<Faction>('all');
   const [sort, setSort] = useState<SortKey>('rank');
@@ -34,6 +37,8 @@ export default function Cards({ s, run, busy, say }: { s: PlayerState; run: Run;
   const [picked, setPicked] = useState<string[]>([]);
   const inDeck = useMemo(() => cardsInDecks(s), [s]);
   const leader = s.cards.find((c) => c.uid === s.quest.leader) || null;
+  const evoReady = (c: CardInstance) => canEvolve(c) && s.cards.some((x) => x.uid !== c.uid && x.cardId === c.cardId && !x.locked && !inDeck.has(x.uid) && x.uid !== s.quest.leader);
+  const pickable = (c: CardInstance) => pick === 'enhance' ? !isMaxed(c) : pick === 'evolve' ? evoReady(c) : true;
   const list = useMemo(() => s.cards
     .filter((c) => c.uid !== s.quest.leader)
     .filter((c) => faction === 'all' || master(c.cardId).faction === faction)
@@ -47,10 +52,10 @@ export default function Cards({ s, run, busy, say }: { s: PlayerState; run: Run;
   return (
     <div>
       <h2 style={{ marginTop: 0 }}>보유카드 리스트 <span className="muted small">({s.cards.length}/{C.INVENTORY_CAP})</span></h2>
-      <div className="seg" style={{ marginBottom: 8 }}>
+      {!pick && <div className="seg" style={{ marginBottom: 8 }}>
         <button className={tab === 'list' ? 'on' : ''} onClick={() => { setTab('list'); setPicked([]); }}>리스트</button>
         <button className={tab === 'sell' ? 'on' : ''} onClick={() => setTab('sell')}>판매</button>
-      </div>
+      </div>}
       <div className="row" style={{ gap: 6, marginBottom: 10 }}>
         <div className="seg grow">
           {(['all', 'dawn', 'dusk'] as Faction[]).map((f) => (
@@ -62,7 +67,19 @@ export default function Cards({ s, run, busy, say }: { s: PlayerState; run: Run;
         </select>
       </div>
 
-      {tab === 'list' && (
+      {pick && (
+        <div className="hint row between" style={{ marginBottom: 10 }}>
+          <span>{pick === 'enhance' ? '강화할 카드를 고르세요. (맥강 카드 제외)' : '진화할 카드를 고르세요. 같은 이름의 재료 카드가 있는 카드만 보여요.'}</span>
+          <button className="btn sm" onClick={clearIntent}>취소</button>
+        </div>
+      )}
+      {pick && (
+        <div className="crows">
+          {[...(leader ? [leader] : []), ...list].filter(pickable).map((c) => <CardRow key={c.uid} c={c} inDeck={inDeck.has(c.uid)} leader={c.uid === s.quest.leader} onClick={() => setOpenUid(c.uid)} />)}
+          {![...(leader ? [leader] : []), ...list].some(pickable) && <p className="muted small">{pick === 'evolve' ? '진화할 수 있는 카드가 없어요. 같은 카드를 2장 모으면 진화할 수 있어요.' : '강화할 수 있는 카드가 없어요.'}</p>}
+        </div>
+      )}
+      {!pick && tab === 'list' && (
         <>
           <div className="crow-head">리더 카드</div>
           {leader ? <CardRow c={leader} inDeck={inDeck.has(leader.uid)} leader onClick={() => setOpenUid(leader.uid)} /> : <p className="muted small">리더 카드가 없어요. 카드를 눌러 리더로 지정하세요.</p>}
@@ -72,7 +89,7 @@ export default function Cards({ s, run, busy, say }: { s: PlayerState; run: Run;
         </>
       )}
 
-      {tab === 'sell' && (
+      {!pick && tab === 'sell' && (
         <>
           <p className="muted small" style={{ marginTop: 0 }}>보호 중·덱 편성 중·리더 카드는 팔 수 없어요.</p>
           <div className="crows">
@@ -89,7 +106,7 @@ export default function Cards({ s, run, busy, say }: { s: PlayerState; run: Run;
           </div>
         </>
       )}
-      {open && <CardDetail key={open.uid} c={open} s={s} run={run} busy={busy} say={say} inDeck={inDeck} onClose={() => setOpenUid(null)} />}
+      {open && <CardDetail key={open.uid} c={open} s={s} run={run} busy={busy} say={say} inDeck={inDeck} initialMode={pick ?? 'info'} onClose={() => setOpenUid(null)} />}
     </div>
   );
 }
@@ -120,10 +137,10 @@ function CardRow({ c, inDeck, leader, selected, price, onClick }: { c: CardInsta
   );
 }
 
-function CardDetail({ c, s, run, busy, say, inDeck, onClose }: {
-  c: CardInstance; s: PlayerState; run: Run; busy: boolean; say: (m: string, e?: boolean) => void; inDeck: Set<string>; onClose: () => void;
+export function CardDetail({ c, s, run, busy, say, inDeck, onClose, initialMode = 'info' }: {
+  c: CardInstance; s: PlayerState; run: Run; busy: boolean; say: (m: string, e?: boolean) => void; inDeck: Set<string>; onClose: () => void; initialMode?: 'info' | 'enhance' | 'evolve';
 }) {
-  const [mode, setMode] = useState<'info' | 'enhance' | 'evolve'>('info');
+  const [mode, setMode] = useState<'info' | 'enhance' | 'evolve'>(initialMode);
   const [mats, setMats] = useState<string[]>([]);
   const [evoMat, setEvoMat] = useState<string | null>(null);
   const m = master(c.cardId);

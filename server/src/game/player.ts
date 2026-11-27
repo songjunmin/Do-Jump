@@ -412,6 +412,24 @@ export function questStep(s: PlayerState, chapter: number, part: number, ctx: Ct
   };
 }
 
+/** 은화 뽑기: 1회 또는 10회 */
+export function gacha(s: PlayerState, count: number, ctx: Ctx) {
+  if (count !== 1 && count !== 10) throw new Error('1회 또는 10회만 뽑을 수 있습니다.');
+  const cost = C.gachaCost(count);
+  if (s.silver < cost) throw new Error(`은화가 부족합니다. (필요 ${cost.toLocaleString()})`);
+  if (s.cards.length + count > C.INVENTORY_CAP) throw new Error(`보유 카드가 가득 찼습니다. (${s.cards.length}/${C.INVENTORY_CAP})`);
+  s.silver -= cost;
+  const got: string[] = [];
+  for (let i = 0; i < count; i++) {
+    let r = ctx.rng();
+    let rank: C.Rank = 'N';
+    for (const x of C.GACHA_RATES) { if (r < x.p) { rank = x.rank; break; } r -= x.p; }
+    const inst = grantCard(s, pick(cardsOf(rank), ctx.rng), ctx.now)!;
+    got.push(inst.uid);
+  }
+  return { cost, cards: got };
+}
+
 /** 카드 판매가: 등급 기본가 × 투입 장수 + 레벨 보정 */
 export const sellPrice = (c: CardInstance) => C.SELL_PRICE[rankOf(c)] * Math.max(1, c.base_cards_used) + c.level * 5;
 

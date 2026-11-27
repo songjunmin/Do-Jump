@@ -101,6 +101,18 @@ describe('퀘스트', () => {
     expect(r.state.cards.length).toBe(s.cards.length - 1);
   });
 
+  test('은화 뽑기: 1회 1,000 / 10회 9,000, 카드 지급', async (server) => {
+    const s = await setup(server);
+    const one = await server.gacha(1);
+    expect(one.result.cards.length).toBe(1);
+    expect(one.state.silver).toBe(s.silver - 1000);
+    const ten = await server.gacha(10);
+    expect(ten.result.cards.length).toBe(10);
+    expect(ten.state.silver).toBe(s.silver - 10000);
+    expect(ten.state.cards.length).toBe(s.cards.length + 11);
+    expect(await fails(server.gacha(3))).toContain('1회 또는 10회');
+  });
+
   test('리더 카드는 강화 재료로 쓸 수 없다', async (server) => {
     const s = await setup(server);
     const n = s.cards.find((c: any) => c.cardId === 'n_spear');

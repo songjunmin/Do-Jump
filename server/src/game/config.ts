@@ -57,6 +57,13 @@ export const INVENTORY_CAP = 200;
 /** 플레이어 레벨업 경험치 (Lv1 → 10) */
 export const playerExpToNext = (level: number) => 5 + level * 5;
 
+/** 뽑기 (은화). 10회는 1회분 할인 */
+export const GACHA_COST = 1_000;
+export const GACHA_RATES: { rank: Rank; p: number }[] = [
+  { rank: 'N', p: 0.6 }, { rank: 'HN', p: 0.28 }, { rank: 'R', p: 0.1 }, { rank: 'HR', p: 0.02 },
+];
+export const gachaCost = (count: number) => (count >= 10 ? GACHA_COST * (count - 1) : GACHA_COST * count);
+
 /** 카드 판매 기본가 (등급별) */
 export const SELL_PRICE: Record<Rank, number> = { N: 50, HN: 100, R: 300, HR: 1000, SR: 3000, SSR: 8000, LG: 20000 };
 /** 보스전에서 리더 카드의 체력 = 방어력 × 배수 */

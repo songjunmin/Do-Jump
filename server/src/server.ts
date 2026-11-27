@@ -133,6 +133,15 @@ export class Server {
     return { ...view(s, c), result };
   }
 
+  /** 은화 뽑기 (1회 / 10회) */
+  async gacha(count: number) {
+    const c = ctx();
+    const s = await loadOrThrow(c);
+    const result = P.gacha(s, Number(count), c);
+    await save(s);
+    return { ...view(s, c), result };
+  }
+
   /** 카드 판매 (여러 장 한 번에) */
   async sellCards(uids: string[]) {
     const c = ctx();

@@ -50,6 +50,9 @@ export default function Raid({ s, run, busy }: { s: PlayerState; run: Run; busy:
           <dt>토벌 수</dt><dd>{s.raid.kills}</dd>
         </dl>
         <button className="btn primary block" style={{ marginTop: 10 }} disabled={busy || s.tickets <= 0 || !boss} onClick={go}>교전 (입장권 -1)</button>
+        {s.stardust > 0 && s.tickets + C.STARDUST_TICKETS <= C.TICKET_HARD_CAP && (
+          <button className="btn sm block" style={{ marginTop: 6 }} disabled={busy} onClick={() => run('useStardust')}>{CURRENCY.stardust.name} 사용 · 입장권 +{C.STARDUST_TICKETS} ({s.stardust}개 보유)</button>
+        )}
       </div>
       <div className="panel small muted">
         교전 시작 시 양쪽 덱 스킬을 한 번 굴리고, 이후에는 <b>공격 먼저 → 보스 반격</b>을 방어도가 0이 될 때까지 반복합니다.
